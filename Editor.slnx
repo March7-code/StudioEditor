@@ -1,0 +1,8 @@
+﻿<Solution>
+  <Project Path="BodyEditor.Editor.csproj" />
+  <Project Path="BodyEditor.Runtime.csproj" />
+  <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="BodyEditor.Adapter.Pmx.csproj" />
+  <Project Path="BodyEditor.Tests.Editor.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+</Solution>

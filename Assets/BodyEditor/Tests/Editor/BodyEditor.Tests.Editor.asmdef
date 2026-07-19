@@ -1,0 +1,22 @@
+{
+  "name": "BodyEditor.Tests.Editor",
+  "rootNamespace": "BodyEditor.Tests",
+  "references": [
+    "BodyEditor.Runtime",
+    "BodyEditor.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

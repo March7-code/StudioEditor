@@ -55,11 +55,13 @@
   <ItemGroup>
     <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorSidebar.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\BodyEditorViewport.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\BodySectionField.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Editing\EditableSkeletonController.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelPresentation.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonSchema.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ViewportControls.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeleton.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\AssemblyInfo.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\ViewportAxisGizmo.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonFactory.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\BodySkeletonSidebar.cs" />
@@ -69,6 +71,7 @@
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelImport.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\ReferenceModelSidebar.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorTopBar.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceSectionRings.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\BodyEditor\Runtime\BodyEditor.Runtime.asmdef" />

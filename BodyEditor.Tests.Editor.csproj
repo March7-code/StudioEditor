@@ -55,6 +55,7 @@
   <ItemGroup>
     <Compile Include="Assets\BodyEditor\Tests\Editor\ReferenceMeshTopologyTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\HumanoidSkeletonTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\ReferenceSectionRingTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\BodyEditor\Tests\Editor\BodyEditor.Tests.Editor.asmdef" />

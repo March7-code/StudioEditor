@@ -35,13 +35,15 @@ namespace BodyEditor.ReferenceModels
             Transform transform,
             int parentIndex,
             bool isBodyBone = false,
-            int bodyParentIndex = -1)
+            int bodyParentIndex = -1,
+            HumanBodyBones? humanoidBone = null)
         {
             Name = name ?? string.Empty;
             Transform = transform;
             ParentIndex = parentIndex;
             IsBodyBone = isBodyBone;
             BodyParentIndex = bodyParentIndex;
+            HumanoidBone = humanoidBone;
         }
 
         public string Name { get; }
@@ -53,6 +55,8 @@ namespace BodyEditor.ReferenceModels
         public bool IsBodyBone { get; }
 
         public int BodyParentIndex { get; }
+
+        public HumanBodyBones? HumanoidBone { get; }
     }
 
     public interface IReferenceModelFormatAdapter

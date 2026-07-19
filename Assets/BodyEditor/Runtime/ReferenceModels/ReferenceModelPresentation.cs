@@ -4,6 +4,13 @@ using UnityEngine;
 
 namespace BodyEditor.ReferenceModels
 {
+    public enum ReferenceTopologyDisplayMode
+    {
+        Edges,
+        Rings,
+        Both,
+    }
+
     public sealed class ReferenceModelPartState
     {
         internal ReferenceModelPartState(
@@ -34,6 +41,10 @@ namespace BodyEditor.ReferenceModels
             new Color(0.2f, 0.78f, 0.62f, 0.24f);
         internal static readonly Color MeshTopologyColor =
             new Color(0.66f, 0.88f, 0.92f, 0.92f);
+        internal static readonly Color SectionRingColor =
+            new Color(1f, 0.56f, 0.16f, 1f);
+        internal static readonly Color SectionFieldColor =
+            new Color(0.24f, 0.88f, 0.62f, 0.82f);
 
         private readonly List<ReferenceModelPartState> meshItems =
             new List<ReferenceModelPartState>();
@@ -42,9 +53,13 @@ namespace BodyEditor.ReferenceModels
         private ReferenceModelImportController importController;
         private GameObject currentRoot;
         private SourceRenderer[] sourceRenderers = Array.Empty<SourceRenderer>();
+        private bool[] sourceInitiallyEnabled = Array.Empty<bool>();
         private MeshHighlightOverlay meshOverlay;
         private ReferenceMeshTopologyOverlay topologyOverlay;
+        private ReferenceSectionRingOverlay sectionRingOverlay;
+        private BodySectionFieldOverlay sectionFieldOverlay;
         private SkeletonOverlay skeletonOverlay;
+        private BodySectionField sectionField = BodySectionField.Empty;
 
         public event Action StateChanged;
 
@@ -52,7 +67,17 @@ namespace BodyEditor.ReferenceModels
         public bool SupportsBodyBoneView { get; private set; }
         public bool BodyBonesOnly { get; private set; }
         public bool TopologyMode { get; private set; }
+        public ReferenceTopologyDisplayMode TopologyDisplayMode { get; private set; } =
+            ReferenceTopologyDisplayMode.Edges;
+        public int SectionRingCount { get; private set; } =
+            ReferenceSectionRingOverlay.DefaultRingCount;
         public bool SupportsTopologyMode => HasModel && topologyOverlay != null;
+        public bool SupportsSectionRings => sectionRingOverlay?.IsSupported == true;
+        public IReadOnlyList<ReferenceSectionRing> SectionRings =>
+            sectionRingOverlay?.Rings ?? Array.Empty<ReferenceSectionRing>();
+        public IReadOnlyList<ReferenceJointPatch> JointPatches =>
+            sectionRingOverlay?.JointPatches ?? Array.Empty<ReferenceJointPatch>();
+        public BodySectionField SectionField => sectionField;
         public int Revision { get; private set; }
         public IReadOnlyList<ReferenceModelPartState> MeshItems => meshItems;
         public IReadOnlyList<ReferenceModelPartState> BoneItems => boneItems;
@@ -95,6 +120,7 @@ namespace BodyEditor.ReferenceModels
                 SetMeshItemVisible(index, visible, false);
             }
 
+            RefreshSectionRings();
             StateChanged?.Invoke();
         }
 
@@ -201,6 +227,13 @@ namespace BodyEditor.ReferenceModels
         public void SetTopologyMode(bool enabled)
         {
             enabled = enabled && SupportsTopologyMode;
+            if (enabled &&
+                importController.Current is IReferenceModelPhysicsController physics &&
+                physics.PhysicsEnabled)
+            {
+                physics.SetPhysicsEnabled(false);
+            }
+
             if (TopologyMode == enabled)
             {
                 return;
@@ -208,6 +241,42 @@ namespace BodyEditor.ReferenceModels
 
             TopologyMode = enabled;
             ApplyTopologyMode();
+            StateChanged?.Invoke();
+        }
+
+        public void SetTopologyDisplayMode(ReferenceTopologyDisplayMode mode)
+        {
+            if ((mode == ReferenceTopologyDisplayMode.Rings ||
+                 mode == ReferenceTopologyDisplayMode.Both) &&
+                !SupportsSectionRings)
+            {
+                mode = ReferenceTopologyDisplayMode.Edges;
+            }
+
+            if (TopologyDisplayMode == mode)
+            {
+                return;
+            }
+
+            TopologyDisplayMode = mode;
+            RefreshSectionRings();
+            ApplyTopologyMode();
+            StateChanged?.Invoke();
+        }
+
+        public void SetSectionRingCount(int count)
+        {
+            count = Mathf.Clamp(
+                count,
+                1,
+                ReferenceSectionRingOverlay.MaximumRingCount);
+            if (SectionRingCount == count)
+            {
+                return;
+            }
+
+            SectionRingCount = count;
+            RefreshSectionRings();
             StateChanged?.Invoke();
         }
 
@@ -225,9 +294,13 @@ namespace BodyEditor.ReferenceModels
                 !TopologyMode && visible && meshItems[index].Highlighted);
             topologyOverlay?.SetVisible(
                 index,
-                TopologyMode && visible && sourceRenderers[index].InitiallyEnabled);
+                TopologyMode &&
+                TopologyDisplayMode != ReferenceTopologyDisplayMode.Rings &&
+                visible &&
+                sourceRenderers[index].InitiallyEnabled);
             if (notify)
             {
+                RefreshSectionRings();
                 StateChanged?.Invoke();
             }
         }
@@ -277,19 +350,24 @@ namespace BodyEditor.ReferenceModels
 
             var renderers = CollectMeshRenderers(root);
             sourceRenderers = new SourceRenderer[renderers.Count];
+            sourceInitiallyEnabled = new bool[renderers.Count];
             for (var index = 0; index < renderers.Count; index++)
             {
                 var renderer = renderers[index];
                 sourceRenderers[index] = new SourceRenderer(renderer);
+                sourceInitiallyEnabled[index] =
+                    sourceRenderers[index].InitiallyEnabled;
                 meshItems.Add(new ReferenceModelPartState(
                     renderer.name,
                     BuildPath(root.transform, renderer.transform)));
             }
 
+            var skeletonProvider =
+                importController.Current as IReferenceModelSkeletonProvider;
             CollectBones(
                 root,
                 renderers,
-                importController.Current as IReferenceModelSkeletonProvider,
+                skeletonProvider,
                 out var bones,
                 out var parentIndices,
                 out var bodyParentIndices,
@@ -321,6 +399,16 @@ namespace BodyEditor.ReferenceModels
                     renderers,
                     shader,
                     MeshTopologyColor);
+                sectionRingOverlay = new ReferenceSectionRingOverlay(
+                    transform,
+                    renderers,
+                    skeletonProvider,
+                    shader,
+                    SectionRingColor);
+                sectionFieldOverlay = new BodySectionFieldOverlay(
+                    transform,
+                    shader,
+                    SectionFieldColor);
                 skeletonOverlay = new SkeletonOverlay(
                     transform,
                     bones,
@@ -347,16 +435,23 @@ namespace BodyEditor.ReferenceModels
 
             meshOverlay?.Dispose();
             topologyOverlay?.Dispose();
+            sectionRingOverlay?.Dispose();
+            sectionFieldOverlay?.Dispose();
             skeletonOverlay?.Dispose();
             meshOverlay = null;
             topologyOverlay = null;
+            sectionRingOverlay = null;
+            sectionFieldOverlay = null;
             skeletonOverlay = null;
+            sectionField = BodySectionField.Empty;
             sourceRenderers = Array.Empty<SourceRenderer>();
+            sourceInitiallyEnabled = Array.Empty<bool>();
             meshItems.Clear();
             boneItems.Clear();
             SupportsBodyBoneView = false;
             BodyBonesOnly = false;
             TopologyMode = false;
+            TopologyDisplayMode = ReferenceTopologyDisplayMode.Edges;
             currentRoot = null;
         }
 
@@ -373,10 +468,36 @@ namespace BodyEditor.ReferenceModels
                     !TopologyMode && visible && meshItems[index].Highlighted);
                 topologyOverlay?.SetVisible(
                     index,
-                    TopologyMode && visible);
+                    TopologyMode &&
+                    TopologyDisplayMode != ReferenceTopologyDisplayMode.Rings &&
+                    visible);
             }
 
+            sectionRingOverlay?.SetVisible(
+                TopologyMode &&
+                TopologyDisplayMode != ReferenceTopologyDisplayMode.Edges);
+            sectionFieldOverlay?.SetVisible(
+                TopologyMode &&
+                TopologyDisplayMode != ReferenceTopologyDisplayMode.Edges);
             skeletonOverlay?.SetVisible(!TopologyMode);
+        }
+
+        private void RefreshSectionRings()
+        {
+            if (sectionRingOverlay == null ||
+                TopologyDisplayMode == ReferenceTopologyDisplayMode.Edges)
+            {
+                return;
+            }
+
+            sectionRingOverlay.Rebuild(
+                meshItems,
+                sourceInitiallyEnabled,
+                SectionRingCount);
+            sectionField = BodySectionFieldBuilder.Build(
+                sectionRingOverlay.Rings,
+                sectionRingOverlay.JointPatches);
+            sectionFieldOverlay?.Rebuild(sectionField);
         }
 
         private static List<Renderer> CollectMeshRenderers(GameObject root)

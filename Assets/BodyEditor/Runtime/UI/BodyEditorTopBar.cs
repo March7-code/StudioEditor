@@ -18,6 +18,8 @@ namespace BodyEditor.UI
         private const string StatusReadyClass = "topbar__status--ready";
         private const string StatusLoadingClass = "topbar__status--loading";
         private const string StatusErrorClass = "topbar__status--error";
+        private const string TopologyModeSelectedClass =
+            "topbar__topology-mode--selected";
 
         private ReferenceModelImportController controller;
         private ReferenceModelPresentationController presentation;
@@ -28,6 +30,10 @@ namespace BodyEditor.UI
         private VisualElement uiRoot;
         private VisualElement viewportInput;
         private Button importButton;
+        private Button topologyEdgesButton;
+        private Button topologyRingsButton;
+        private Button topologyBothButton;
+        private IntegerField sectionRingCountField;
         private Toggle topologyToggle;
         private Toggle physicsToggle;
         private Label modelLabel;
@@ -78,6 +84,12 @@ namespace BodyEditor.UI
             {
                 topologyToggle.UnregisterValueChangedCallback(
                     HandleTopologyChanged);
+            }
+
+            if (sectionRingCountField != null)
+            {
+                sectionRingCountField.UnregisterValueChangedCallback(
+                    HandleSectionRingCountChanged);
             }
 
             UnregisterViewportInput();
@@ -155,6 +167,42 @@ namespace BodyEditor.UI
             topologyToggle.RegisterValueChangedCallback(HandleTopologyChanged);
             topBar.Add(topologyToggle);
 
+            var topologyModes = new VisualElement
+            {
+                tooltip = "Choose triangle edges, source-vertex rings, or both",
+            };
+            topologyModes.AddToClassList("topbar__topology-modes");
+            topologyEdgesButton = CreateTopologyModeButton(
+                "Edges",
+                ReferenceTopologyDisplayMode.Edges,
+                "Show the imported triangle topology");
+            topologyEdgesButton.AddToClassList(
+                "topbar__topology-mode--first");
+            topologyRingsButton = CreateTopologyModeButton(
+                "Rings",
+                ReferenceTopologyDisplayMode.Rings,
+                "Orange source observations with the green recovered section field");
+            topologyBothButton = CreateTopologyModeButton(
+                "Both",
+                ReferenceTopologyDisplayMode.Both,
+                "Show triangle topology and captured source-vertex rings");
+            topologyBothButton.AddToClassList(
+                "topbar__topology-mode--last");
+            topologyModes.Add(topologyEdgesButton);
+            topologyModes.Add(topologyRingsButton);
+            topologyModes.Add(topologyBothButton);
+            topBar.Add(topologyModes);
+
+            sectionRingCountField = new IntegerField("Count")
+            {
+                tooltip = "Source-vertex ring samples per semantic segment (1-100)",
+                isDelayed = true,
+            };
+            sectionRingCountField.AddToClassList("topbar__ring-count");
+            sectionRingCountField.RegisterValueChangedCallback(
+                HandleSectionRingCountChanged);
+            topBar.Add(sectionRingCountField);
+
             physicsToggle = new Toggle("Physics")
             {
                 tooltip = "Enable model physics",
@@ -184,7 +232,8 @@ namespace BodyEditor.UI
         private void HandlePhysicsChanged(ChangeEvent<bool> changeEvent)
         {
             if (controller.Current is IReferenceModelPhysicsController physics &&
-                physics.SupportsPhysics)
+                physics.SupportsPhysics &&
+                !presentation.TopologyMode)
             {
                 physics.SetPhysicsEnabled(changeEvent.newValue);
             }
@@ -196,6 +245,29 @@ namespace BodyEditor.UI
         {
             presentation.SetTopologyMode(changeEvent.newValue);
             RefreshTopologyState();
+            RefreshPhysicsState();
+        }
+
+        private Button CreateTopologyModeButton(
+            string text,
+            ReferenceTopologyDisplayMode mode,
+            string tooltip)
+        {
+            var button = new Button(() =>
+                presentation.SetTopologyDisplayMode(mode))
+            {
+                text = text,
+                tooltip = tooltip,
+            };
+            button.AddToClassList("topbar__topology-mode");
+            return button;
+        }
+
+        private void HandleSectionRingCountChanged(ChangeEvent<int> changeEvent)
+        {
+            presentation.SetSectionRingCount(changeEvent.newValue);
+            sectionRingCountField.SetValueWithoutNotify(
+                presentation.SectionRingCount);
         }
 
         private void HandleKeyDown(KeyDownEvent keyEvent)
@@ -449,6 +521,7 @@ namespace BodyEditor.UI
             var physics = controller.Current as IReferenceModelPhysicsController;
             var supported = physics?.SupportsPhysics == true;
             physicsToggle.SetEnabled(supported &&
+                                     !presentation.TopologyMode &&
                                      controller.Status != ReferenceModelImportStatus.Loading);
             physicsToggle.SetValueWithoutNotify(supported && physics.PhysicsEnabled);
         }
@@ -465,7 +538,43 @@ namespace BodyEditor.UI
             topologyToggle.SetEnabled(supported);
             topologyToggle.SetValueWithoutNotify(
                 supported && presentation.TopologyMode);
+            var topologyActive = supported && presentation.TopologyMode;
+            SetTopologyModeButtonState(
+                topologyEdgesButton,
+                ReferenceTopologyDisplayMode.Edges,
+                topologyActive);
+            SetTopologyModeButtonState(
+                topologyRingsButton,
+                ReferenceTopologyDisplayMode.Rings,
+                topologyActive && presentation.SupportsSectionRings);
+            SetTopologyModeButtonState(
+                topologyBothButton,
+                ReferenceTopologyDisplayMode.Both,
+                topologyActive && presentation.SupportsSectionRings);
+            if (sectionRingCountField != null)
+            {
+                sectionRingCountField.SetEnabled(
+                    topologyActive && presentation.SupportsSectionRings);
+                sectionRingCountField.SetValueWithoutNotify(
+                    presentation.SectionRingCount);
+            }
             editableSkeleton?.SetVisible(!presentation.TopologyMode);
+        }
+
+        private void SetTopologyModeButtonState(
+            Button button,
+            ReferenceTopologyDisplayMode mode,
+            bool enabled)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.SetEnabled(enabled);
+            button.EnableInClassList(
+                TopologyModeSelectedClass,
+                presentation.TopologyDisplayMode == mode);
         }
 
         private void SetStatus(

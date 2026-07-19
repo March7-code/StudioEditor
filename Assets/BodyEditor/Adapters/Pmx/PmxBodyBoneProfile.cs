@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using BodyEditor.ReferenceModels;
 using UMT;
+using UnityEngine;
 
 namespace BodyEditor.ReferenceModels
 {
@@ -98,6 +99,72 @@ namespace BodyEditor.ReferenceModels
                 }
             }
 
+            var humanoidBoneByIndex = new HumanBodyBones?[count];
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.LeftUpperArm,
+                "左腕捩",
+                "左腕捩1",
+                "左腕捩2",
+                "左腕捩3");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.LeftLowerArm,
+                "左手捩",
+                "左手捩1",
+                "左手捩2",
+                "左手捩3");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.RightUpperArm,
+                "右腕捩",
+                "右腕捩1",
+                "右腕捩2",
+                "右腕捩3");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.RightLowerArm,
+                "右手捩",
+                "右手捩1",
+                "右手捩2",
+                "右手捩3");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.LeftUpperLeg,
+                "左足D");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.LeftLowerLeg,
+                "左ひざD",
+                "左膝D");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.LeftFoot,
+                "左足首D");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.RightUpperLeg,
+                "右足D");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.RightLowerLeg,
+                "右ひざD",
+                "右膝D");
+            MapSkinningAliases(
+                sourceIndexByName,
+                humanoidBoneByIndex,
+                HumanBodyBones.RightFoot,
+                "右足首D");
+
             var bodyParentByIndex = new int[count];
             var isBodyBone = new bool[count];
             for (var index = 0; index < bodyParentByIndex.Length; index++)
@@ -114,6 +181,7 @@ namespace BodyEditor.ReferenceModels
                 }
 
                 isBodyBone[sourceIndex] = true;
+                humanoidBoneByIndex[sourceIndex] = ToHumanoidBone(rule.Slot);
                 for (var parentIndex = 0;
                      parentIndex < rule.ParentCandidates.Length;
                      parentIndex++)
@@ -137,7 +205,8 @@ namespace BodyEditor.ReferenceModels
                     result.bones[index],
                     source.parentBoneIndex,
                     isBodyBone[index],
-                    bodyParentByIndex[index]);
+                    bodyParentByIndex[index],
+                    humanoidBoneByIndex[index]);
             }
 
             return Array.AsReadOnly(values);
@@ -183,6 +252,53 @@ namespace BodyEditor.ReferenceModels
             }
 
             return result.ToString();
+        }
+
+        private static void MapSkinningAliases(
+            IReadOnlyDictionary<string, int> sourceIndexByName,
+            HumanBodyBones?[] humanoidBoneByIndex,
+            HumanBodyBones humanoidBone,
+            params string[] aliases)
+        {
+            for (var index = 0; index < aliases.Length; index++)
+            {
+                if (sourceIndexByName.TryGetValue(
+                        Normalize(aliases[index]),
+                        out var sourceIndex))
+                {
+                    humanoidBoneByIndex[sourceIndex] = humanoidBone;
+                }
+            }
+        }
+
+        private static HumanBodyBones? ToHumanoidBone(BodySlot slot)
+        {
+            switch (slot)
+            {
+                case BodySlot.Hips: return HumanBodyBones.Hips;
+                case BodySlot.Spine: return HumanBodyBones.Spine;
+                case BodySlot.Chest: return HumanBodyBones.Chest;
+                case BodySlot.UpperChest: return HumanBodyBones.UpperChest;
+                case BodySlot.Neck: return HumanBodyBones.Neck;
+                case BodySlot.Head: return HumanBodyBones.Head;
+                case BodySlot.LeftShoulder: return HumanBodyBones.LeftShoulder;
+                case BodySlot.LeftUpperArm: return HumanBodyBones.LeftUpperArm;
+                case BodySlot.LeftLowerArm: return HumanBodyBones.LeftLowerArm;
+                case BodySlot.LeftHand: return HumanBodyBones.LeftHand;
+                case BodySlot.RightShoulder: return HumanBodyBones.RightShoulder;
+                case BodySlot.RightUpperArm: return HumanBodyBones.RightUpperArm;
+                case BodySlot.RightLowerArm: return HumanBodyBones.RightLowerArm;
+                case BodySlot.RightHand: return HumanBodyBones.RightHand;
+                case BodySlot.LeftUpperLeg: return HumanBodyBones.LeftUpperLeg;
+                case BodySlot.LeftLowerLeg: return HumanBodyBones.LeftLowerLeg;
+                case BodySlot.LeftFoot: return HumanBodyBones.LeftFoot;
+                case BodySlot.LeftToes: return HumanBodyBones.LeftToes;
+                case BodySlot.RightUpperLeg: return HumanBodyBones.RightUpperLeg;
+                case BodySlot.RightLowerLeg: return HumanBodyBones.RightLowerLeg;
+                case BodySlot.RightFoot: return HumanBodyBones.RightFoot;
+                case BodySlot.RightToes: return HumanBodyBones.RightToes;
+                default: return null;
+            }
         }
 
         private readonly struct BodyBoneRule

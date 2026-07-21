@@ -1,0 +1,20 @@
+{
+  "name": "BodyEditor.Adapter.Koikatsu",
+  "rootNamespace": "BodyEditor",
+  "references": [
+    "BodyEditor.Runtime",
+    "BodyEditor.Characters"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "MessagePack.dll",
+    "AssetsTools.NET.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

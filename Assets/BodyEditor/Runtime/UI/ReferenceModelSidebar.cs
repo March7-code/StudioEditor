@@ -10,11 +10,16 @@ namespace BodyEditor.UI
         private readonly ReferenceModelImportController importController;
         private readonly ReferenceModelPresentationController presentation;
         private readonly Label modelName;
+        private readonly Label sourceName;
+        private readonly VisualElement variantRow;
+        private readonly Label variantLabel;
+        private readonly DropdownField variantField;
         private readonly Toggle bodyBonesOnly;
         private readonly ScrollView tree;
         private GroupView meshGroup;
         private GroupView skeletonGroup;
         private int displayedRevision = -1;
+        private bool updatingVariant;
 
         public ReferenceModelSidebar(
             ReferenceModelImportController importController,
@@ -32,6 +37,30 @@ namespace BodyEditor.UI
             modelName = new Label("No model");
             modelName.AddToClassList("reference-sidebar__model");
             Add(modelName);
+
+            var sourceRow = new VisualElement();
+            sourceRow.AddToClassList("reference-sidebar__metadata-row");
+            var sourceLabel = new Label("Source");
+            sourceLabel.AddToClassList("reference-sidebar__metadata-label");
+            sourceRow.Add(sourceLabel);
+            sourceName = new Label("-");
+            sourceName.AddToClassList("reference-sidebar__metadata-value");
+            sourceRow.Add(sourceName);
+            Add(sourceRow);
+
+            variantRow = new VisualElement();
+            variantRow.AddToClassList("reference-sidebar__metadata-row");
+            variantLabel = new Label("Outfit");
+            variantLabel.AddToClassList("reference-sidebar__metadata-label");
+            variantRow.Add(variantLabel);
+            variantField = new DropdownField
+            {
+                choices = new List<string>(),
+            };
+            variantField.AddToClassList("reference-sidebar__variant");
+            variantField.RegisterValueChangedCallback(HandleVariantChanged);
+            variantRow.Add(variantField);
+            Add(variantRow);
 
             bodyBonesOnly = new Toggle("Body bones only")
             {
@@ -54,6 +83,7 @@ namespace BodyEditor.UI
             Add(tree);
 
             presentation.StateChanged += Refresh;
+            importController.StateChanged += Refresh;
             RegisterCallback<DetachFromPanelEvent>(HandleDetach);
             Refresh();
         }
@@ -63,6 +93,12 @@ namespace BodyEditor.UI
             modelName.text = presentation.HasModel
                 ? importController.Current?.DisplayName ?? "Reference model"
                 : "No model";
+            sourceName.text = presentation.HasModel &&
+                              !string.IsNullOrEmpty(
+                                  importController.CurrentFormatName)
+                ? importController.CurrentFormatName
+                : "-";
+            RefreshVariant();
             bodyBonesOnly.SetEnabled(
                 presentation.HasModel && presentation.SupportsBodyBoneView);
             bodyBonesOnly.SetValueWithoutNotify(presentation.BodyBonesOnly);
@@ -91,6 +127,54 @@ namespace BodyEditor.UI
                 presentation.BodyBonesOnly);
             meshGroup.Root.SetEnabled(presentation.HasModel);
             skeletonGroup.Root.SetEnabled(presentation.HasModel);
+        }
+
+        private void RefreshVariant()
+        {
+            var variants = importController.Current as
+                IReferenceModelVariantProvider;
+            var visible = presentation.HasModel &&
+                          variants != null &&
+                          variants.VariantNames.Count != 0;
+            variantRow.style.display = visible
+                ? DisplayStyle.Flex
+                : DisplayStyle.None;
+            if (!visible)
+            {
+                return;
+            }
+
+            variantLabel.text = string.IsNullOrEmpty(variants.VariantLabel)
+                ? "Variant"
+                : variants.VariantLabel;
+            var choices = new List<string>(variants.VariantNames);
+            var index = variants.ActiveVariantIndex;
+            if (index < 0 || index >= choices.Count)
+            {
+                index = 0;
+            }
+
+            updatingVariant = true;
+            variantField.choices = choices;
+            variantField.SetValueWithoutNotify(choices[index]);
+            updatingVariant = false;
+            variantField.SetEnabled(
+                importController.Status != ReferenceModelImportStatus.Loading);
+        }
+
+        private async void HandleVariantChanged(ChangeEvent<string> changeEvent)
+        {
+            if (updatingVariant ||
+                importController.Status == ReferenceModelImportStatus.Loading)
+            {
+                return;
+            }
+
+            var index = variantField.choices.IndexOf(changeEvent.newValue);
+            if (index >= 0)
+            {
+                await importController.SelectVariantAsync(index);
+            }
         }
 
         private void RebuildTree()
@@ -180,6 +264,8 @@ namespace BodyEditor.UI
         private void HandleDetach(DetachFromPanelEvent detachEvent)
         {
             presentation.StateChanged -= Refresh;
+            importController.StateChanged -= Refresh;
+            variantField.UnregisterValueChangedCallback(HandleVariantChanged);
         }
 
         private static Toggle CreateToggle(string columnClass)

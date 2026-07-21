@@ -12,7 +12,6 @@ namespace BodyEditor.UI
     [RequireComponent(typeof(UIDocument))]
     [RequireComponent(typeof(ReferenceModelImportController))]
     [RequireComponent(typeof(ReferenceModelPresentationController))]
-    [RequireComponent(typeof(EditableSkeletonController))]
     public sealed class BodyEditorTopBar : MonoBehaviour
     {
         private const string StatusReadyClass = "topbar__status--ready";
@@ -24,12 +23,15 @@ namespace BodyEditor.UI
         private ReferenceModelImportController controller;
         private ReferenceModelPresentationController presentation;
         private EditableSkeletonController editableSkeleton;
+        private CharacterControlPointController characterControls;
         private BodyEditorViewport viewport;
         private BodyEditorViewportInputController inputController;
         private bool skeletonPointerActive;
+        private bool controlPointPointerActive;
         private VisualElement uiRoot;
         private VisualElement viewportInput;
         private Button importButton;
+        private Button sceneImportButton;
         private Button topologyEdgesButton;
         private Button topologyRingsButton;
         private Button topologyBothButton;
@@ -44,6 +46,7 @@ namespace BodyEditor.UI
             controller = GetComponent<ReferenceModelImportController>();
             presentation = GetComponent<ReferenceModelPresentationController>();
             editableSkeleton = GetComponent<EditableSkeletonController>();
+            characterControls = GetComponent<CharacterControlPointController>();
             viewport = GetComponent<BodyEditorViewport>();
             if (viewport != null)
             {
@@ -75,6 +78,11 @@ namespace BodyEditor.UI
                 importButton.clicked -= PickAndImport;
             }
 
+            if (sceneImportButton != null)
+            {
+                sceneImportButton.clicked -= PickAndImportScene;
+            }
+
             if (physicsToggle != null)
             {
                 physicsToggle.UnregisterValueChangedCallback(HandlePhysicsChanged);
@@ -102,7 +110,9 @@ namespace BodyEditor.UI
             }
 
             editableSkeleton?.EndPointerDrag();
+            characterControls?.EndPointerDrag();
             skeletonPointerActive = false;
+            controlPointPointerActive = false;
             inputController = null;
         }
 
@@ -154,6 +164,15 @@ namespace BodyEditor.UI
             importButton.AddToClassList("topbar__import");
             importButton.clicked += PickAndImport;
             topBar.Add(importButton);
+
+            sceneImportButton = new Button
+            {
+                text = "Import Scene",
+                tooltip = "Import a Koikatsu Studio scene card",
+            };
+            sceneImportButton.AddToClassList("topbar__scene-import");
+            sceneImportButton.clicked += PickAndImportScene;
+            topBar.Add(sceneImportButton);
 
             modelLabel = new Label("No model");
             modelLabel.AddToClassList("topbar__model");
@@ -222,6 +241,8 @@ namespace BodyEditor.UI
                 root.Add(new ViewportAxisGizmo(viewport));
             }
 
+            root.Add(new ReferenceTimelinePanel(controller, viewportInput));
+
             root.Add(new BodyEditorSidebar(
                 editableSkeleton,
                 controller,
@@ -272,7 +293,18 @@ namespace BodyEditor.UI
 
         private void HandleKeyDown(KeyDownEvent keyEvent)
         {
-            if (skeletonPointerActive ||
+            if (!skeletonPointerActive && !controlPointPointerActive &&
+                (keyEvent.keyCode == KeyCode.Delete ||
+                 keyEvent.keyCode == KeyCode.Backspace) &&
+                characterControls?.ClearSelectedControlPoint() == true)
+            {
+                keyEvent.StopImmediatePropagation();
+                return;
+            }
+
+            if (editableSkeleton == null ||
+                skeletonPointerActive ||
+                controlPointPointerActive ||
                 (!keyEvent.ctrlKey && !keyEvent.commandKey))
             {
                 return;
@@ -307,7 +339,21 @@ namespace BodyEditor.UI
         private void HandlePointerDown(PointerDownEvent pointerEvent)
         {
             viewportInput.Focus();
-            if (pointerEvent.button == (int)ViewportPointerButton.Left &&
+            if (characterControls != null &&
+                pointerEvent.button == (int)ViewportPointerButton.Left &&
+                TryCreatePointerRay(pointerEvent.position, out var controlRay) &&
+                characterControls.BeginPointerDrag(
+                    controlRay,
+                    viewport.ViewRotation * Vector3.forward))
+            {
+                controlPointPointerActive = true;
+                viewportInput.CapturePointer(pointerEvent.pointerId);
+                pointerEvent.StopPropagation();
+                return;
+            }
+
+            if (editableSkeleton != null &&
+                pointerEvent.button == (int)ViewportPointerButton.Left &&
                 TryCreatePointerRay(pointerEvent.position, out var ray) &&
                 editableSkeleton.BeginPointerDrag(
                     ray,
@@ -333,12 +379,24 @@ namespace BodyEditor.UI
 
         private void HandlePointerMove(PointerMoveEvent pointerEvent)
         {
+            if (controlPointPointerActive &&
+                viewportInput.HasPointerCapture(pointerEvent.pointerId))
+            {
+                if (TryCreatePointerRay(pointerEvent.position, out var controlRay))
+                {
+                    characterControls?.UpdatePointerDrag(controlRay);
+                }
+
+                pointerEvent.StopPropagation();
+                return;
+            }
+
             if (skeletonPointerActive &&
                 viewportInput.HasPointerCapture(pointerEvent.pointerId))
             {
                 if (TryCreatePointerRay(pointerEvent.position, out var ray))
                 {
-                    editableSkeleton.UpdatePointerDrag(ray);
+                    editableSkeleton?.UpdatePointerDrag(ray);
                 }
 
                 pointerEvent.StopPropagation();
@@ -386,6 +444,12 @@ namespace BodyEditor.UI
 
         private void ReleasePointer(int pointerId)
         {
+            if (controlPointPointerActive)
+            {
+                characterControls?.EndPointerDrag();
+                controlPointPointerActive = false;
+            }
+
             if (skeletonPointerActive)
             {
                 editableSkeleton?.EndPointerDrag();
@@ -457,14 +521,43 @@ namespace BodyEditor.UI
             await controller.ImportAsync(filePath);
         }
 
-        private List<string> CollectExtensions()
+        private async void PickAndImportScene()
+        {
+            var extensions = CollectExtensions(true);
+            if (!WindowsModelFilePicker.TryPick(
+                    extensions,
+                    out var filePath,
+                    out var pickerError,
+                    "Import Koikatsu Studio Scene",
+                    "Koikatsu Studio Scenes"))
+            {
+                if (!string.IsNullOrEmpty(pickerError))
+                {
+                    SetStatus("File dialog failed", StatusErrorClass, pickerError);
+                    Debug.LogError($"[Body Editor] {pickerError}", this);
+                }
+
+                return;
+            }
+
+            modelLabel.text = Path.GetFileName(filePath);
+            await controller.ImportSceneAsync(filePath);
+        }
+
+        private List<string> CollectExtensions(bool sceneAdapters = false)
         {
             var extensions = new List<string>();
             for (var adapterIndex = 0;
                  adapterIndex < controller.Adapters.Count;
                  adapterIndex++)
             {
-                var adapterExtensions = controller.Adapters[adapterIndex].FileExtensions;
+                var adapter = controller.Adapters[adapterIndex];
+                if ((adapter is IReferenceSceneFormatAdapter) != sceneAdapters)
+                {
+                    continue;
+                }
+
+                var adapterExtensions = adapter.FileExtensions;
                 for (var extensionIndex = 0;
                      extensionIndex < adapterExtensions.Count;
                      extensionIndex++)
@@ -489,6 +582,9 @@ namespace BodyEditor.UI
 
             importButton.SetEnabled(
                 controller.Status != ReferenceModelImportStatus.Loading);
+            sceneImportButton?.SetEnabled(
+                controller.Status != ReferenceModelImportStatus.Loading &&
+                CollectExtensions(true).Count > 0);
             RefreshPhysicsState();
             RefreshTopologyState();
 

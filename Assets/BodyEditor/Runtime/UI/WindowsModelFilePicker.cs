@@ -12,7 +12,9 @@ namespace BodyEditor.UI
         public static bool TryPick(
             IReadOnlyList<string> extensions,
             out string filePath,
-            out string error)
+            out string error,
+            string dialogTitle = "Import Model",
+            string filterLabel = "Supported Models")
         {
             filePath = string.Empty;
             error = string.Empty;
@@ -27,11 +29,12 @@ namespace BodyEditor.UI
             try
             {
                 const int maxFileCharacters = 4096;
-                filter = Marshal.StringToHGlobalUni(BuildFilter(extensions));
+                filter = Marshal.StringToHGlobalUni(
+                    BuildFilter(extensions, filterLabel));
                 fileBuffer = Marshal.AllocHGlobal(maxFileCharacters * sizeof(char));
                 Marshal.WriteInt16(fileBuffer, 0);
                 initialDirectory = AllocateString(lastDirectory);
-                title = Marshal.StringToHGlobalUni("Import Model");
+                title = Marshal.StringToHGlobalUni(dialogTitle);
                 defaultExtension = AllocateString(GetDefaultExtension(extensions));
 
                 var options = new OpenFileName
@@ -145,7 +148,9 @@ namespace BodyEditor.UI
             }
         }
 
-        private static string BuildFilter(IReadOnlyList<string> extensions)
+        private static string BuildFilter(
+            IReadOnlyList<string> extensions,
+            string label)
         {
             var patterns = new List<string>();
             for (var index = 0; index < extensions.Count; index++)
@@ -160,7 +165,10 @@ namespace BodyEditor.UI
             var joinedPatterns = patterns.Count > 0
                 ? string.Join(";", patterns)
                 : "*.*";
-            return $"Supported Models ({joinedPatterns})\0{joinedPatterns}\0" +
+            label = string.IsNullOrWhiteSpace(label)
+                ? "Supported Files"
+                : label;
+            return $"{label} ({joinedPatterns})\0{joinedPatterns}\0" +
                    "All Files (*.*)\0*.*\0\0";
         }
 

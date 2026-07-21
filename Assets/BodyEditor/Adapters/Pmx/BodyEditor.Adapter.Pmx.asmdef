@@ -3,6 +3,7 @@
   "rootNamespace": "BodyEditor",
   "references": [
     "BodyEditor.Runtime",
+    "BodyEditor.Characters",
     "UMT.Runtime",
     "Unity.Collections"
   ],

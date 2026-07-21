@@ -21,19 +21,33 @@ namespace BodyEditor.UI
 
             var tabs = new VisualElement();
             tabs.AddToClassList("editor-sidebar__tabs");
-            bodyTab = CreateTab("Body", () => ShowPanel(true));
             referenceTab = CreateTab("Reference", () => ShowPanel(false));
-            tabs.Add(bodyTab);
+
+            if (editableSkeleton != null)
+            {
+                bodyTab = CreateTab("Body", () => ShowPanel(true));
+                tabs.Add(bodyTab);
+                bodyPanel = new BodySkeletonSidebar(editableSkeleton);
+            }
+            else
+            {
+                bodyTab = null;
+                bodyPanel = null;
+            }
+
             tabs.Add(referenceTab);
             Add(tabs);
 
-            bodyPanel = new BodySkeletonSidebar(editableSkeleton);
             referencePanel = new ReferenceModelSidebar(
                 importController,
                 presentation);
-            Add(bodyPanel);
+            if (bodyPanel != null)
+            {
+                Add(bodyPanel);
+            }
+
             Add(referencePanel);
-            ShowPanel(true);
+            ShowPanel(editableSkeleton != null);
         }
 
         private static Button CreateTab(string text, System.Action action)
@@ -48,16 +62,27 @@ namespace BodyEditor.UI
 
         private void ShowPanel(bool showBody)
         {
-            bodyPanel.style.display = showBody
-                ? DisplayStyle.Flex
-                : DisplayStyle.None;
-            referencePanel.style.display = showBody
+            var displayBody = showBody && bodyPanel != null;
+            if (bodyPanel != null)
+            {
+                bodyPanel.style.display = displayBody
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None;
+            }
+
+            referencePanel.style.display = displayBody
                 ? DisplayStyle.None
                 : DisplayStyle.Flex;
-            bodyTab.EnableInClassList("editor-sidebar__tab--selected", showBody);
+            if (bodyTab != null)
+            {
+                bodyTab.EnableInClassList(
+                    "editor-sidebar__tab--selected",
+                    displayBody);
+            }
+
             referenceTab.EnableInClassList(
                 "editor-sidebar__tab--selected",
-                !showBody);
+                !displayBody);
         }
     }
 }

@@ -17,6 +17,12 @@ namespace BodyEditor.ReferenceModels
 
         public IReadOnlyList<string> FileExtensions => extensions;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void RegisterAdapter()
+        {
+            ReferenceModelAdapterRegistry.Register<PmxReferenceModelAdapter>();
+        }
+
         public async Task<IReferenceModelInstance> ImportAsync(
             string filePath,
             Transform parent,

@@ -26,12 +26,14 @@ namespace BodyEditor.Viewport
         private float distance = 8f;
         private float yaw = 25f;
         private float pitch = 12f;
+        private float roll;
+        private Vector2 cameraOffset;
         private ViewportAxis? alignedAxis;
         private int alignedAxisSign = 1;
 
         public ViewportControlSettings Controls => controls;
 
-        public Quaternion ViewRotation => Quaternion.Euler(pitch, yaw, 0f);
+        public Quaternion ViewRotation => Quaternion.Euler(pitch, yaw, roll);
 
         public bool TryCreatePointerRay(
             Vector2 normalizedPanelPosition,
@@ -138,6 +140,9 @@ namespace BodyEditor.Viewport
                     break;
             }
 
+            roll = 0f;
+            cameraOffset = Vector2.zero;
+
             viewportCamera.orthographic = true;
             ApplyCameraPose();
         }
@@ -169,9 +174,12 @@ namespace BodyEditor.Viewport
 
         private void ApplyCameraPose()
         {
-            var rotation = Quaternion.Euler(pitch, yaw, 0f);
+            var rotation = Quaternion.Euler(pitch, yaw, roll);
             viewportCamera.transform.SetPositionAndRotation(
-                focus - rotation * Vector3.forward * distance,
+                focus + rotation * new Vector3(
+                    cameraOffset.x,
+                    cameraOffset.y,
+                    -distance),
                 rotation);
             if (viewportCamera.orthographic)
             {
@@ -192,7 +200,39 @@ namespace BodyEditor.Viewport
                 return;
             }
 
+            if (importController.Current is IReferenceModelCameraProvider provider &&
+                provider.TryGetCamera(out var pose))
+            {
+                ApplyReferenceCamera(pose);
+                return;
+            }
+
             Frame(importController.Current.Root);
+        }
+
+        private void ApplyReferenceCamera(ReferenceModelCameraPose pose)
+        {
+            if (!EnsureCamera())
+            {
+                return;
+            }
+
+            focus = pose.Target;
+            pitch = pose.EulerAngles.x;
+            yaw = pose.EulerAngles.y;
+            roll = pose.EulerAngles.z;
+            cameraOffset = new Vector2(pose.Distance.x, pose.Distance.y);
+            distance = Mathf.Clamp(
+                -pose.Distance.z,
+                MinDistance,
+                MaxDistance);
+            viewportCamera.fieldOfView = Mathf.Clamp(
+                pose.FieldOfView,
+                1f,
+                179f);
+            viewportCamera.orthographic = false;
+            alignedAxis = null;
+            ApplyCameraPose();
         }
 
         public void Frame(GameObject root)
@@ -202,6 +242,9 @@ namespace BodyEditor.Viewport
             {
                 return;
             }
+
+            roll = 0f;
+            cameraOffset = Vector2.zero;
 
             var bounds = renderers[0].bounds;
             for (var index = 1; index < renderers.Length; index++)

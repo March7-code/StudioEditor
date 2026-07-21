@@ -1,7 +1,9 @@
 {
   "name": "BodyEditor.Runtime",
   "rootNamespace": "BodyEditor",
-  "references": [],
+  "references": [
+    "BodyEditor.Characters"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

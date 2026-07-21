@@ -1,5 +1,6 @@
-using BodyEditor.ReferenceModels;
+using BodyEditor.Characters.Legacy;
 using BodyEditor.Editing;
+using BodyEditor.ReferenceModels;
 using BodyEditor.Viewport;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -35,9 +36,15 @@ namespace BodyEditor.UI
             document.sortingOrder = 100f;
 
             var controller = root.AddComponent<ReferenceModelImportController>();
-            controller.RegisterAdapter(new PmxReferenceModelAdapter());
+            var adapters = ReferenceModelAdapterRegistry.CreateAdapters();
+            for (var index = 0; index < adapters.Count; index++)
+            {
+                controller.RegisterAdapter(adapters[index]);
+            }
             root.AddComponent<ReferenceModelPresentationController>();
-            root.AddComponent<EditableSkeletonController>();
+            root.AddComponent<LegacyCharacterModelBridge>();
+            root.AddComponent<CharacterControlPointController>();
+            root.AddComponent<CharacterBodyConstraintController>();
 
             var lifetime = root.AddComponent<BodyEditorRuntimeLifetime>();
             lifetime.PanelSettings = panelSettings;

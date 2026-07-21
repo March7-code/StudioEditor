@@ -3,7 +3,8 @@
   "rootNamespace": "BodyEditor.Tests",
   "references": [
     "BodyEditor.Runtime",
-    "BodyEditor.Editor"
+    "BodyEditor.Editor",
+    "BodyEditor.Adapter.Koikatsu"
   ],
   "includePlatforms": [
     "Editor"

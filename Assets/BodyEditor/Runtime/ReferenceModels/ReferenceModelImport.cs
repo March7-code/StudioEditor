@@ -14,6 +14,43 @@ namespace BodyEditor.ReferenceModels
         GameObject Root { get; }
     }
 
+    public readonly struct ReferenceModelCameraPose
+    {
+        public ReferenceModelCameraPose(
+            Vector3 target,
+            Vector3 eulerAngles,
+            Vector3 distance,
+            float fieldOfView)
+        {
+            Target = target;
+            EulerAngles = eulerAngles;
+            Distance = distance;
+            FieldOfView = fieldOfView;
+        }
+
+        public Vector3 Target { get; }
+
+        public Vector3 EulerAngles { get; }
+
+        public Vector3 Distance { get; }
+
+        public float FieldOfView { get; }
+    }
+
+    public interface IReferenceModelCameraProvider
+    {
+        bool TryGetCamera(out ReferenceModelCameraPose pose);
+    }
+
+    public interface IReferenceModelVariantProvider
+    {
+        string VariantLabel { get; }
+
+        IReadOnlyList<string> VariantNames { get; }
+
+        int ActiveVariantIndex { get; }
+    }
+
     public interface IReferenceModelPhysicsController
     {
         bool SupportsPhysics { get; }
@@ -21,6 +58,91 @@ namespace BodyEditor.ReferenceModels
         bool PhysicsEnabled { get; }
 
         void SetPhysicsEnabled(bool enabled);
+    }
+
+    public enum ReferenceTimelineTrackKind
+    {
+        Position,
+        Rotation,
+        Scale,
+        Value,
+        Unsupported,
+    }
+
+    public sealed class ReferenceTimelineTrack
+    {
+        public ReferenceTimelineTrack(
+            int index,
+            string name,
+            string target,
+            ReferenceTimelineTrackKind kind,
+            int keyframeCount,
+            bool enabled,
+            bool supported,
+            string status = null)
+        {
+            Index = index;
+            Name = name ?? string.Empty;
+            Target = target ?? string.Empty;
+            Kind = kind;
+            KeyframeCount = keyframeCount;
+            Enabled = enabled;
+            Supported = supported;
+            Status = status ?? string.Empty;
+        }
+
+        public int Index { get; }
+
+        public string Name { get; }
+
+        public string Target { get; }
+
+        public ReferenceTimelineTrackKind Kind { get; }
+
+        public int KeyframeCount { get; }
+
+        public bool Enabled { get; private set; }
+
+        public bool Supported { get; }
+
+        public string Status { get; }
+
+        public void SetEnabled(bool enabled)
+        {
+            Enabled = enabled;
+        }
+    }
+
+    public interface IReferenceModelTimelineController
+    {
+        event Action StateChanged;
+
+        float Duration { get; }
+
+        float CurrentTime { get; }
+
+        float PlaybackSpeed { get; set; }
+
+        bool IsPlaying { get; }
+
+        bool Loop { get; set; }
+
+        IReadOnlyList<ReferenceTimelineTrack> Tracks { get; }
+
+        void Play();
+
+        void Pause();
+
+        void Stop();
+
+        void Seek(float time);
+
+        void SetTrackEnabled(int trackIndex, bool enabled);
+    }
+
+    public interface IReferenceModelTimelineProvider
+    {
+        IReferenceModelTimelineController Timeline { get; }
     }
 
     public interface IReferenceModelSkeletonProvider
@@ -71,6 +193,21 @@ namespace BodyEditor.ReferenceModels
             CancellationToken cancellationToken);
     }
 
+    public interface IReferenceSceneFormatAdapter :
+        IReferenceModelFormatAdapter
+    {
+    }
+
+    public interface IReferenceModelVariantFormatAdapter :
+        IReferenceModelFormatAdapter
+    {
+        Task<IReferenceModelInstance> ImportVariantAsync(
+            string filePath,
+            Transform parent,
+            int variantIndex,
+            CancellationToken cancellationToken);
+    }
+
     public enum ReferenceModelImportStatus
     {
         Idle,
@@ -86,6 +223,7 @@ namespace BodyEditor.ReferenceModels
 
         private CancellationTokenSource activeLoad;
         private IReferenceModelInstance current;
+        private IReferenceModelFormatAdapter currentAdapter;
         private int loadVersion;
 
         public event Action StateChanged;
@@ -96,6 +234,9 @@ namespace BodyEditor.ReferenceModels
         public string Error { get; private set; } = string.Empty;
 
         public string CurrentPath { get; private set; } = string.Empty;
+
+        public string CurrentFormatName => currentAdapter?.FormatName ??
+                                           string.Empty;
 
         public IReferenceModelInstance Current => current;
 
@@ -118,7 +259,7 @@ namespace BodyEditor.ReferenceModels
                 return false;
             }
 
-            var adapter = FindAdapter(filePath);
+            var adapter = FindAdapter(filePath, false);
             if (adapter == null)
             {
                 SetState(
@@ -126,6 +267,72 @@ namespace BodyEditor.ReferenceModels
                     $"No model adapter supports '{Path.GetExtension(filePath)}'.");
                 return false;
             }
+
+            return await ImportInternalAsync(
+                filePath,
+                adapter,
+                cancellationToken => adapter.ImportAsync(
+                    filePath,
+                    transform,
+                    cancellationToken));
+        }
+
+        public async Task<bool> ImportSceneAsync(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return false;
+            }
+
+            var adapter = FindAdapter(filePath, true);
+            if (adapter == null)
+            {
+                SetState(
+                    ReferenceModelImportStatus.Failed,
+                    $"No scene adapter supports '{Path.GetExtension(filePath)}'.");
+                return false;
+            }
+
+            return await ImportInternalAsync(
+                filePath,
+                adapter,
+                cancellationToken => adapter.ImportAsync(
+                    filePath,
+                    transform,
+                    cancellationToken));
+        }
+
+        public async Task<bool> SelectVariantAsync(int variantIndex)
+        {
+            if (!(current is IReferenceModelVariantProvider variants) ||
+                !(currentAdapter is IReferenceModelVariantFormatAdapter adapter) ||
+                variantIndex < 0 ||
+                variantIndex >= variants.VariantNames.Count)
+            {
+                return false;
+            }
+
+            if (variantIndex == variants.ActiveVariantIndex)
+            {
+                return true;
+            }
+
+            var filePath = CurrentPath;
+            return await ImportInternalAsync(
+                filePath,
+                adapter,
+                cancellationToken => adapter.ImportVariantAsync(
+                    filePath,
+                    transform,
+                    variantIndex,
+                    cancellationToken));
+        }
+
+        private async Task<bool> ImportInternalAsync(
+            string filePath,
+            IReferenceModelFormatAdapter adapter,
+            Func<CancellationToken, Task<IReferenceModelInstance>> import)
+        {
 
             activeLoad?.Cancel();
             var cancellation = new CancellationTokenSource();
@@ -135,15 +342,12 @@ namespace BodyEditor.ReferenceModels
 
             try
             {
-                var instance = await adapter.ImportAsync(
-                    filePath,
-                    transform,
-                    cancellation.Token);
+                var instance = await import(cancellation.Token);
 
                 if (instance == null)
                 {
                     throw new InvalidOperationException(
-                        $"{adapter.FormatName} adapter returned no model instance.");
+                        $"{adapter.FormatName} adapter returned no imported instance.");
                 }
 
                 if (version != loadVersion || cancellation.IsCancellationRequested)
@@ -154,6 +358,7 @@ namespace BodyEditor.ReferenceModels
 
                 current?.Dispose();
                 current = instance;
+                currentAdapter = adapter;
                 CurrentPath = filePath;
                 SetState(ReferenceModelImportStatus.Ready);
                 return true;
@@ -196,15 +401,24 @@ namespace BodyEditor.ReferenceModels
             activeLoad?.Cancel();
             current?.Dispose();
             current = null;
+            currentAdapter = null;
             CurrentPath = string.Empty;
             SetState(ReferenceModelImportStatus.Idle);
         }
 
-        private IReferenceModelFormatAdapter FindAdapter(string filePath)
+        private IReferenceModelFormatAdapter FindAdapter(
+            string filePath,
+            bool sceneAdapter)
         {
             var extension = Path.GetExtension(filePath);
             for (var adapterIndex = 0; adapterIndex < adapters.Count; adapterIndex++)
             {
+                if ((adapters[adapterIndex] is IReferenceSceneFormatAdapter) !=
+                    sceneAdapter)
+                {
+                    continue;
+                }
+
                 var extensions = adapters[adapterIndex].FileExtensions;
                 for (var extensionIndex = 0;
                      extensionIndex < extensions.Count;
@@ -237,6 +451,7 @@ namespace BodyEditor.ReferenceModels
             activeLoad?.Cancel();
             current?.Dispose();
             current = null;
+            currentAdapter = null;
             StateChanged = null;
         }
     }

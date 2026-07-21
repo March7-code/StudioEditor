@@ -636,6 +636,10 @@
       <HintPath>F:\Unity\Editor\Data\Managed\UnityEngine\UnityEditor.XRModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="AssetsTools.NET">
+      <HintPath>Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Unity.Collections.LowLevel.ILSupport">
       <HintPath>Library\PackageCache\com.unity.collections@a43cabe808ca\Unity.Collections.LowLevel.ILSupport\Unity.Collections.LowLevel.ILSupport.dll</HintPath>
       <Private>False</Private>
@@ -1426,7 +1430,11 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="BodyEditor.Rendering.csproj" />
+    <ProjectReference Include="BodyEditor.Adapter.Koikatsu.csproj" />
+    <ProjectReference Include="BodyEditor.RenderScheme.DefaultAnime.csproj" />
     <ProjectReference Include="BodyEditor.Adapter.Pmx.csproj" />
+    <ProjectReference Include="BodyEditor.Characters.csproj" />
     <ProjectReference Include="BodyEditor.Runtime.csproj" />
     <ProjectReference Include="BodyEditor.Editor.csproj" />
   </ItemGroup>

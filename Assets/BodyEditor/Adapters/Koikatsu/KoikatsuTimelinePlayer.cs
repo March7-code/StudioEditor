@@ -256,12 +256,20 @@ namespace BodyEditor.ReferenceModels
             var name = string.IsNullOrWhiteSpace(source.Alias)
                 ? $"{source.Owner}/{source.Id}"
                 : source.Alias;
+            var keyframeTimes = new float[source.Keyframes.Count];
+            for (var keyIndex = 0;
+                 keyIndex < source.Keyframes.Count;
+                 keyIndex++)
+            {
+                keyframeTimes[keyIndex] = source.Keyframes[keyIndex].Time;
+            }
+
             tracks.Add(new ReferenceTimelineTrack(
                 index,
                 name,
                 targetLabel,
                 supported ? kind : ReferenceTimelineTrackKind.Unsupported,
-                source.Keyframes.Count,
+                keyframeTimes,
                 supported && source.Enabled,
                 supported,
                 status));

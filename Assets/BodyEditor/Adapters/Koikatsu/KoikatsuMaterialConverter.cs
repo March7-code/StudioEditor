@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BodyEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -7,22 +8,10 @@ namespace BodyEditor.ReferenceModels
 {
     internal static class KoikatsuMaterialConverter
     {
-        private const string CharacterShaderResourcePath =
-            "Shaders/KoikatsuCharacter";
-
         private static readonly Color SkinColor =
             new Color(1f, 0.78f, 0.70f, 1f);
         private static readonly Color DetailColor =
             new Color(0.16f, 0.07f, 0.05f, 1f);
-
-        private enum KoikatsuCharacterMaterialStyle
-        {
-            Skin,
-            Face,
-            Hair,
-            Clothes,
-            Accessory,
-        }
 
         public static void Convert(
             GameObject model,
@@ -63,7 +52,7 @@ namespace BodyEditor.ReferenceModels
                 null,
                 null,
                 null,
-                KoikatsuCharacterMaterialStyle.Hair);
+                CharacterRenderSurfaceRole.Hair);
         }
 
         public static void ConvertClothes(
@@ -90,7 +79,7 @@ namespace BodyEditor.ReferenceModels
                 null,
                 rendererMap,
                 bakedTextures,
-                KoikatsuCharacterMaterialStyle.Clothes);
+                CharacterRenderSurfaceRole.Clothes);
         }
 
         public static void ConvertAccessory(
@@ -109,7 +98,7 @@ namespace BodyEditor.ReferenceModels
                 accessory,
                 hair,
                 runtimeMaterials,
-                KoikatsuCharacterMaterialStyle.Accessory);
+                CharacterRenderSurfaceRole.Accessory);
         }
 
         public static void ApplyMaterialEditorMainTextures(
@@ -143,7 +132,7 @@ namespace BodyEditor.ReferenceModels
                             "MainTex");
                     if (texture != null)
                     {
-                        SetMainTexture(material, texture);
+                        MaterialRenderUtility.SetMainTexture(material, texture);
                     }
                 }
             }
@@ -171,7 +160,7 @@ namespace BodyEditor.ReferenceModels
                 null,
                 null,
                 null,
-                KoikatsuCharacterMaterialStyle.Skin);
+                CharacterRenderSurfaceRole.Skin);
         }
 
         public static void ConvertFace(
@@ -194,7 +183,7 @@ namespace BodyEditor.ReferenceModels
                 eyeTextures,
                 null,
                 null,
-                KoikatsuCharacterMaterialStyle.Face);
+                CharacterRenderSurfaceRole.Face);
             ApplyFaceTextures(
                 model,
                 skinColor,
@@ -281,8 +270,8 @@ namespace BodyEditor.ReferenceModels
                     materials[index].SetColor("_BaseColor", color);
                 }
 
-                SetMainTexture(materials[index], texture);
-                ConfigureTransparent(materials[index]);
+                MaterialRenderUtility.SetMainTexture(materials[index], texture);
+                MaterialRenderUtility.ConfigureTransparent(materials[index]);
             }
 
             renderer.enabled = hasTexture;
@@ -299,10 +288,15 @@ namespace BodyEditor.ReferenceModels
             KoikatsuBakedEyeTextures eyeTextures,
             KoikatsuClothesRendererMap clothesRendererMap,
             KoikatsuBakedClothesTextures bakedClothesTextures,
-            KoikatsuCharacterMaterialStyle? characterStyle)
+            CharacterRenderSurfaceRole? characterStyle)
         {
-            var shader = ResolveShader(characterStyle);
-            if (shader == null)
+            var characterScheme = characterStyle.HasValue
+                ? CharacterRenderSchemeRegistry.GetDefault()
+                : null;
+            var fallbackShader = characterScheme == null
+                ? ResolveFallbackShader()
+                : null;
+            if (characterScheme == null && fallbackShader == null)
             {
                 throw new InvalidOperationException(
                     "No compatible Unity shader is available for Koikatsu materials.");
@@ -369,27 +363,28 @@ namespace BodyEditor.ReferenceModels
                             source != null && source.HasProperty("_Color")
                                 ? source.GetColor("_Color")
                                 : Color.white);
-                    var converted = new Material(shader)
-                    {
-                        name = (source != null ? source.name : renderer.name) +
-                               " (Koikatsu Preview)",
-                        color = materialColor,
-                    };
-                    if (converted.HasProperty("_BaseColor"))
-                    {
-                        converted.SetColor("_BaseColor", materialColor);
-                    }
-
-                    ApplySourceRendering(source, converted);
-                    if (characterStyle.HasValue)
-                    {
-                        ConfigureCharacterMaterial(
+                    var materialName =
+                        (source != null ? source.name : renderer.name) +
+                        " (Koikatsu Preview)";
+                    var converted = characterScheme != null
+                        ? characterScheme.CreateMaterial(
+                            new CharacterRenderMaterialContext(
+                                source,
+                                characterStyle.Value,
+                                materialKey,
+                                materialName,
+                                materialColor,
+                                hair?.OutlineColor))
+                        : CreateFallbackMaterial(
                             source,
-                            converted,
-                            characterStyle.Value,
-                            materialKey,
-                            materialColor,
-                            hair?.OutlineColor);
+                            fallbackShader,
+                            materialName,
+                            materialColor);
+                    if (converted == null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Character render scheme '{characterScheme?.Id}' " +
+                            "returned no material.");
                     }
 
                     var mainTexture = hasBakedIris
@@ -408,29 +403,33 @@ namespace BodyEditor.ReferenceModels
                                 !hasExactClothesMap);
                     if (mainTexture != null)
                     {
-                        SetMainTexture(converted, mainTexture);
-                        CopyMainTextureTransform(source, converted);
+                        MaterialRenderUtility.SetMainTexture(
+                            converted,
+                            mainTexture);
+                        MaterialRenderUtility.CopyMainTextureTransform(
+                            source,
+                            converted);
                     }
 
                     if (skinTexture != null && skinTexture.AlphaClip &&
                         materialKey.Contains(skinTexture.RendererMarker))
                     {
-                        ConfigureCutout(converted, 0.5f);
+                        MaterialRenderUtility.ConfigureCutout(converted, 0.5f);
                     }
 
                     if (hasBakedWhite)
                     {
-                        ConfigureTransparent(
+                        MaterialRenderUtility.ConfigureTransparent(
                             converted,
                             (int)UnityEngine.Rendering.RenderQueue.Transparent);
                     }
                     else if (hasBakedIris)
                     {
-                        SetMainTextureTransform(
+                        MaterialRenderUtility.SetMainTextureTransform(
                             converted,
                             bakedIris.Scale,
                             bakedIris.Offset);
-                        ConfigureTransparent(
+                        MaterialRenderUtility.ConfigureTransparent(
                             converted,
                             (int)UnityEngine.Rendering.RenderQueue.Transparent + 1);
                     }
@@ -457,86 +456,14 @@ namespace BodyEditor.ReferenceModels
                     (materialName ?? string.Empty)).ToLowerInvariant();
         }
 
-        private static void SetMainTexture(Material material, Texture texture)
-        {
-            material.mainTexture = texture;
-            if (material.HasProperty("_BaseMap"))
-            {
-                material.SetTexture("_BaseMap", texture);
-            }
-        }
-
-        private static void SetMainTextureTransform(
-            Material material,
-            Vector2 scale,
-            Vector2 offset)
-        {
-            if (material.HasProperty("_MainTex"))
-            {
-                material.SetTextureScale("_MainTex", scale);
-                material.SetTextureOffset("_MainTex", offset);
-            }
-
-            if (material.HasProperty("_BaseMap"))
-            {
-                material.SetTextureScale("_BaseMap", scale);
-                material.SetTextureOffset("_BaseMap", offset);
-            }
-        }
-
-        private static void ConfigureTransparent(
-            Material material,
-            int renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent)
-        {
-            material.SetOverrideTag("RenderType", "Transparent");
-            if (material.HasProperty("_Mode"))
-            {
-                material.SetFloat("_Mode", 3f);
-            }
-
-            if (material.HasProperty("_Surface"))
-            {
-                material.SetFloat("_Surface", 1f);
-            }
-
-            if (material.HasProperty("_AlphaClip"))
-            {
-                material.SetFloat("_AlphaClip", 0f);
-            }
-
-            if (material.HasProperty("_SrcBlend"))
-            {
-                material.SetFloat(
-                    "_SrcBlend",
-                    (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            }
-
-            if (material.HasProperty("_DstBlend"))
-            {
-                material.SetFloat(
-                    "_DstBlend",
-                    (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            }
-
-            if (material.HasProperty("_ZWrite"))
-            {
-                material.SetFloat("_ZWrite", 0f);
-            }
-
-            material.DisableKeyword("_ALPHATEST_ON");
-            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            material.renderQueue = renderQueue;
-        }
-
         private static void ConvertAccessoryRenderers(
             GameObject model,
             KoikatsuCardAccessory accessory,
             KoikatsuCardHairPart hair,
             ICollection<Material> runtimeMaterials,
-            KoikatsuCharacterMaterialStyle characterStyle)
+            CharacterRenderSurfaceRole characterStyle)
         {
-            var shader = ResolveShader(characterStyle);
+            var characterScheme = CharacterRenderSchemeRegistry.GetDefault();
 
             var renderers = GetRenderersForRuntimeLighting(model);
             for (var rendererIndex = 0;
@@ -562,28 +489,36 @@ namespace BodyEditor.ReferenceModels
                      materialIndex < materialCount;
                      materialIndex++)
                 {
-                var source = materialIndex < sourceMaterials.Length
+                    var source = materialIndex < sourceMaterials.Length
                         ? sourceMaterials[materialIndex]
                         : null;
-                    var converted = new Material(shader)
+                    var materialName =
+                        (source != null ? source.name : renderer.name) +
+                        " (Koikatsu Accessory Preview)";
+                    var converted = characterScheme.CreateMaterial(
+                        new CharacterRenderMaterialContext(
+                            source,
+                            characterStyle,
+                            GetMaterialKey(renderer.name, source?.name),
+                            materialName,
+                            Opaque(previewColor),
+                            hair?.OutlineColor));
+                    if (converted == null)
                     {
-                        name = (source != null ? source.name : renderer.name) +
-                               " (Koikatsu Accessory Preview)",
-                        color = Opaque(previewColor),
-                    };
-                    ApplySourceRendering(source, converted);
-                    ConfigureCharacterMaterial(
-                        source,
-                        converted,
-                        characterStyle,
-                        GetMaterialKey(renderer.name, source?.name),
-                        Opaque(previewColor),
-                        hair?.OutlineColor);
+                        throw new InvalidOperationException(
+                            $"Character render scheme '{characterScheme.Id}' " +
+                            "returned no material.");
+                    }
+
                     var mainTexture = GetMainTexture(source);
                     if (mainTexture != null)
                     {
-                        SetMainTexture(converted, mainTexture);
-                        CopyMainTextureTransform(source, converted);
+                        MaterialRenderUtility.SetMainTexture(
+                            converted,
+                            mainTexture);
+                        MaterialRenderUtility.CopyMainTextureTransform(
+                            source,
+                            converted);
                     }
 
                     convertedMaterials[materialIndex] = converted;
@@ -594,349 +529,26 @@ namespace BodyEditor.ReferenceModels
             }
         }
 
-        private static Shader ResolveShader(
-            KoikatsuCharacterMaterialStyle? characterStyle)
+        private static Shader ResolveFallbackShader()
         {
-            Shader shader = null;
-            if (characterStyle.HasValue)
-            {
-                shader = Resources.Load<Shader>(CharacterShaderResourcePath) ??
-                         Shader.Find("BodyEditor/KoikatsuCharacter");
-            }
-
-            shader = shader ??
-                     Shader.Find("Universal Render Pipeline/Lit") ??
-                     Shader.Find("Standard") ??
-                     Shader.Find("Unlit/Texture");
-            if (shader == null)
-            {
-                throw new InvalidOperationException(
-                    "No compatible Unity shader is available for Koikatsu materials.");
-            }
-
-            return shader;
+            return Shader.Find("Universal Render Pipeline/Lit") ??
+                   Shader.Find("Standard") ??
+                   Shader.Find("Unlit/Texture");
         }
 
-        private static void ConfigureCharacterMaterial(
+        private static Material CreateFallbackMaterial(
             Material source,
-            Material converted,
-            KoikatsuCharacterMaterialStyle style,
-            string materialKey,
-            Color baseColor,
-            Color? requestedOutlineColor)
+            Shader shader,
+            string materialName,
+            Color baseColor)
         {
-            var deepShadow = new Color(0.42f, 0.45f, 0.52f, 1f);
-            var shadow = new Color(0.72f, 0.75f, 0.80f, 1f);
-            var ambientStrength = 0.25f;
-            var specularStrength = 0.25f;
-            var specularPower = 40f;
-            var rimStrength = 0.12f;
-            var rimPower = 4f;
-            var outlineWidth = 0.08f;
-
-            switch (style)
+            var material = new Material(shader)
             {
-                case KoikatsuCharacterMaterialStyle.Skin:
-                    deepShadow = new Color(0.58f, 0.46f, 0.50f, 1f);
-                    shadow = new Color(0.82f, 0.70f, 0.72f, 1f);
-                    ambientStrength = 0.32f;
-                    specularStrength = 0.12f;
-                    specularPower = 32f;
-                    rimStrength = 0.08f;
-                    outlineWidth = 0.06f;
-                    break;
-                case KoikatsuCharacterMaterialStyle.Face:
-                    deepShadow = new Color(0.62f, 0.49f, 0.52f, 1f);
-                    shadow = new Color(0.85f, 0.73f, 0.74f, 1f);
-                    ambientStrength = 0.36f;
-                    specularStrength = 0.08f;
-                    specularPower = 28f;
-                    rimStrength = 0.06f;
-                    outlineWidth = 0.05f;
-                    break;
-                case KoikatsuCharacterMaterialStyle.Hair:
-                    deepShadow = new Color(0.32f, 0.36f, 0.48f, 1f);
-                    shadow = new Color(0.65f, 0.68f, 0.78f, 1f);
-                    ambientStrength = 0.25f;
-                    specularStrength = 0.55f;
-                    specularPower = 64f;
-                    rimStrength = 0.22f;
-                    rimPower = 3f;
-                    outlineWidth = 0.12f;
-                    break;
-                case KoikatsuCharacterMaterialStyle.Accessory:
-                    specularStrength = 0.30f;
-                    outlineWidth = 0.06f;
-                    break;
-            }
-
-            SetColor(converted, "_DeepShadowColor", deepShadow);
-            SetColor(converted, "_ShadowColor", shadow);
-            SetVector(
-                converted,
-                "_BandThresholds",
-                new Vector4(0.18f, 0.38f, 0.58f, 0.78f));
-            SetFloat(converted, "_BandSoftness", 0.015f);
-            SetFloat(converted, "_AmbientStrength", ambientStrength);
-            SetFloat(converted, "_SpecularStrength", specularStrength);
-            SetFloat(converted, "_SpecularPower", specularPower);
-            SetFloat(converted, "_RimStrength", rimStrength);
-            SetFloat(converted, "_RimPower", rimPower);
-
-            var outlineColor = requestedOutlineColor ??
-                               FindColor(
-                                   source,
-                                   "_LineColor",
-                                   "_OutlineColor") ??
-                               new Color(
-                                   baseColor.r * 0.18f,
-                                   baseColor.g * 0.18f,
-                                   baseColor.b * 0.18f,
-                                   1f);
-            outlineColor.a = 1f;
-            if (IsFaceDetail(materialKey) ||
-                GetFloat(converted, "_Surface", 0f) > 0.5f)
-            {
-                outlineWidth = 0f;
-            }
-
-            SetColor(converted, "_OutlineColor", outlineColor);
-            SetFloat(converted, "_OutlineWidth", outlineWidth);
-
-            var normalMap = FindTexture(
-                source,
-                "_BumpMap",
-                "_NormalMap",
-                "_NormalTex");
-            if (normalMap != null)
-            {
-                SetTexture(converted, "_NormalMap", normalMap);
-                SetTexture(converted, "_BumpMap", normalMap);
-                var normalStrength = Mathf.Clamp(
-                    FindFloat(source, 1f, "_BumpScale", "_NormalScale"),
-                    0f,
-                    2f);
-                SetFloat(
-                    converted,
-                    "_NormalStrength",
-                    normalStrength);
-                SetFloat(converted, "_BumpScale", normalStrength);
-                converted.EnableKeyword("_NORMALMAP");
-            }
-
-            var styleMask = FindTexture(
-                source,
-                "_LightMap",
-                "_LightMapTex",
-                "_LightMapTexture",
-                "_LightMapMask");
-            if (styleMask != null)
-            {
-                SetTexture(converted, "_StyleMask", styleMask);
-                SetFloat(converted, "_StyleMaskStrength", 1f);
-            }
-
-            var metallicMap = FindTexture(source, "_MetallicGlossMap");
-            if (metallicMap != null)
-            {
-                SetTexture(converted, "_MetallicGlossMap", metallicMap);
-                SetFloat(converted, "_MetallicMapStrength", 1f);
-            }
-
-            var specularMap = FindTexture(source, "_SpecGlossMap");
-            if (specularMap != null)
-            {
-                SetTexture(converted, "_SpecGlossMap", specularMap);
-                SetFloat(converted, "_SpecularMapStrength", 1f);
-            }
-
-            var ramp = FindTexture(
-                source,
-                "_ShadowRamp",
-                "_Shadow_Ramp",
-                "_RampTex",
-                "_AnotherRamp");
-            if (ramp != null)
-            {
-                SetTexture(converted, "_RampMap", ramp);
-                SetFloat(converted, "_RampStrength", 1f);
-            }
-
-            SetFloat(
-                converted,
-                "_Metallic",
-                Mathf.Clamp01(FindFloat(source, 0f, "_Metallic")));
-            SetFloat(
-                converted,
-                "_Smoothness",
-                Mathf.Clamp01(
-                    FindFloat(
-                        source,
-                        style == KoikatsuCharacterMaterialStyle.Hair
-                            ? 0.65f
-                            : 0.35f,
-                        "_Smoothness",
-                        "_Glossiness",
-                        "_GlossMapScale")));
-
-            var specularColor = FindColor(source, "_SpecColor");
-            if (specularColor.HasValue)
-            {
-                SetColor(converted, "_SpecularColor", specularColor.Value);
-            }
-
-            var emissionColor = FindColor(source, "_EmissionColor");
-            var emissionEnabled = source != null &&
-                (source.IsKeywordEnabled("_EMISSION") ||
-                 (source.globalIlluminationFlags &
-                  MaterialGlobalIlluminationFlags.EmissiveIsBlack) == 0);
-            if (emissionEnabled && emissionColor.HasValue)
-            {
-                var emissionMap = FindTexture(source, "_EmissionMap");
-                if (emissionMap != null)
-                {
-                    SetTexture(converted, "_EmissionMap", emissionMap);
-                }
-
-                SetColor(converted, "_EmissionColor", emissionColor.Value);
-            }
-        }
-
-        private static bool IsFaceDetail(string materialKey)
-        {
-            return materialKey.Contains("hitomi") ||
-                   materialKey.Contains("sirome") ||
-                   materialKey.Contains("mayuge") ||
-                   materialKey.Contains("eyeline") ||
-                   materialKey.Contains("noseline") ||
-                   materialKey.Contains("tooth") ||
-                   materialKey.Contains("canine") ||
-                   materialKey.Contains("tang") ||
-                   materialKey.Contains("namida");
-        }
-
-        private static Texture FindTexture(
-            Material material,
-            params string[] properties)
-        {
-            if (material == null)
-            {
-                return null;
-            }
-
-            for (var index = 0; index < properties.Length; index++)
-            {
-                var property = properties[index];
-                if (!material.HasProperty(property))
-                {
-                    continue;
-                }
-
-                var texture = material.GetTexture(property);
-                if (texture != null)
-                {
-                    return texture;
-                }
-            }
-
-            return null;
-        }
-
-        private static Color? FindColor(
-            Material material,
-            params string[] properties)
-        {
-            if (material == null)
-            {
-                return null;
-            }
-
-            for (var index = 0; index < properties.Length; index++)
-            {
-                var property = properties[index];
-                if (material.HasProperty(property))
-                {
-                    return material.GetColor(property);
-                }
-            }
-
-            return null;
-        }
-
-        private static float FindFloat(
-            Material material,
-            float fallback,
-            params string[] properties)
-        {
-            if (material == null)
-            {
-                return fallback;
-            }
-
-            for (var index = 0; index < properties.Length; index++)
-            {
-                var property = properties[index];
-                if (material.HasProperty(property))
-                {
-                    return material.GetFloat(property);
-                }
-            }
-
-            return fallback;
-        }
-
-        private static void SetTexture(
-            Material material,
-            string property,
-            Texture texture)
-        {
-            if (material.HasProperty(property))
-            {
-                material.SetTexture(property, texture);
-            }
-        }
-
-        private static void SetColor(
-            Material material,
-            string property,
-            Color color)
-        {
-            if (material.HasProperty(property))
-            {
-                material.SetColor(property, color);
-            }
-        }
-
-        private static void SetVector(
-            Material material,
-            string property,
-            Vector4 value)
-        {
-            if (material.HasProperty(property))
-            {
-                material.SetVector(property, value);
-            }
-        }
-
-        private static void SetFloat(
-            Material material,
-            string property,
-            float value)
-        {
-            if (material.HasProperty(property))
-            {
-                material.SetFloat(property, value);
-            }
-        }
-
-        private static float GetFloat(
-            Material material,
-            string property,
-            float fallback)
-        {
-            return material.HasProperty(property)
-                ? material.GetFloat(property)
-                : fallback;
+                name = materialName,
+            };
+            MaterialRenderUtility.SetBaseColor(material, baseColor);
+            MaterialRenderUtility.CopySourceRenderState(source, material);
+            return material;
         }
 
         private static Renderer[] GetRenderersForRuntimeLighting(
@@ -966,109 +578,6 @@ namespace BodyEditor.ReferenceModels
             }
 
             return renderers;
-        }
-
-        private static void ApplySourceRendering(
-            Material source,
-            Material converted)
-        {
-            if (source == null || converted == null)
-            {
-                return;
-            }
-
-            if (source.HasProperty("_Cull") && converted.HasProperty("_Cull"))
-            {
-                converted.SetFloat("_Cull", source.GetFloat("_Cull"));
-            }
-
-            var renderType = source.GetTag("RenderType", false, string.Empty);
-            var cutout = source.HasProperty("_CutoutClip") &&
-                         source.GetFloat("_CutoutClip") > 0.5f ||
-                         string.Equals(
-                             renderType,
-                             "TransparentCutout",
-                             StringComparison.OrdinalIgnoreCase);
-            if (cutout)
-            {
-                var cutoff = source.HasProperty("_Cutoff")
-                    ? source.GetFloat("_Cutoff")
-                    : 0.5f;
-                ConfigureCutout(converted, cutoff);
-                return;
-            }
-
-            if (string.Equals(
-                    renderType,
-                    "Transparent",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                ConfigureTransparent(converted);
-            }
-        }
-
-        private static void CopyMainTextureTransform(
-            Material source,
-            Material converted)
-        {
-            if (source == null || converted == null)
-            {
-                return;
-            }
-
-            SetMainTextureTransform(
-                converted,
-                source.mainTextureScale,
-                source.mainTextureOffset);
-        }
-
-        private static void ConfigureCutout(Material material, float cutoff)
-        {
-            material.SetOverrideTag("RenderType", "TransparentCutout");
-            if (material.HasProperty("_Mode"))
-            {
-                material.SetFloat("_Mode", 1f);
-            }
-
-            if (material.HasProperty("_Surface"))
-            {
-                material.SetFloat("_Surface", 0f);
-            }
-
-            if (material.HasProperty("_AlphaClip"))
-            {
-                material.SetFloat("_AlphaClip", 1f);
-            }
-
-            if (material.HasProperty("_Cutoff"))
-            {
-                material.SetFloat("_Cutoff", Mathf.Clamp01(cutoff));
-            }
-
-            if (material.HasProperty("_SrcBlend"))
-            {
-                material.SetFloat(
-                    "_SrcBlend",
-                    (float)UnityEngine.Rendering.BlendMode.One);
-            }
-
-            if (material.HasProperty("_DstBlend"))
-            {
-                material.SetFloat(
-                    "_DstBlend",
-                    (float)UnityEngine.Rendering.BlendMode.Zero);
-            }
-
-            if (material.HasProperty("_ZWrite"))
-            {
-                material.SetFloat("_ZWrite", 1f);
-            }
-
-            material.EnableKeyword("_ALPHATEST_ON");
-            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-            material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            material.renderQueue =
-                (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
         }
 
         private static Color SelectAccessoryColor(

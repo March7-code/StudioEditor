@@ -653,6 +653,10 @@
       <HintPath>F:\Unity\Editor\Data\PlaybackEngines\MetroSupport\UnityEditor.UWP.Extensions.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="AssetsTools.NET">
+      <HintPath>Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="TextMateSharpPlastic">
       <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\TextMateSharp\TextMateSharpPlastic.dll</HintPath>
       <Private>False</Private>
@@ -1264,6 +1268,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="BodyEditor.Runtime.csproj" />
+    <ProjectReference Include="BodyEditor.Characters.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BodyEditor.Characters.Kinematics;
 using UnityEngine;
 
 namespace BodyEditor.Characters.Constraints
@@ -187,12 +188,15 @@ namespace BodyEditor.Characters.Constraints
                 return;
             }
 
-            SolveTwoBone(
+            CharacterTwoBoneSolver.Solve(
                 pose,
-                limb,
+                limb.RootIndex,
+                limb.MidIndex,
+                limb.TipIndex,
                 tip,
                 mid,
-                pose.GetWorldRotation(limb.TipIndex));
+                pose.GetWorldRotation(limb.TipIndex),
+                limb.TwoBoneSettings);
         }
 
         private Vector3 ResolvePoint(Vector3 point, float radius)
@@ -238,95 +242,6 @@ namespace BodyEditor.Characters.Constraints
 
             var distance = Mathf.Sqrt(squareDistance);
             return offset / distance * (requiredDistance - distance);
-        }
-
-        private static void SolveTwoBone(
-            CharacterPoseBuffer pose,
-            LimbChain limb,
-            Vector3 requestedTarget,
-            Vector3 poleTarget,
-            Quaternion tipWorldRotation)
-        {
-            var rootPosition = pose.GetWorldPosition(limb.RootIndex);
-            var midPosition = pose.GetWorldPosition(limb.MidIndex);
-            var tipPosition = pose.GetWorldPosition(limb.TipIndex);
-            var rootToMid = midPosition - rootPosition;
-            var midToTip = tipPosition - midPosition;
-            var firstLength = rootToMid.magnitude;
-            var secondLength = midToTip.magnitude;
-            if (firstLength < 0.00001f || secondLength < 0.00001f)
-            {
-                return;
-            }
-
-            var targetVector = requestedTarget - rootPosition;
-            var requestedDistance = targetVector.magnitude;
-            if (requestedDistance < 0.00001f)
-            {
-                return;
-            }
-
-            var targetDirection = targetVector / requestedDistance;
-            var minimum = Mathf.Abs(firstLength - secondLength) + 0.00001f;
-            var maximum = firstLength + secondLength - 0.00001f;
-            var solvedDistance = Mathf.Clamp(
-                requestedDistance,
-                minimum,
-                maximum);
-            var projection =
-                (firstLength * firstLength + solvedDistance * solvedDistance -
-                 secondLength * secondLength) /
-                (2f * solvedDistance);
-            var height = Mathf.Sqrt(Mathf.Max(
-                0f,
-                firstLength * firstLength - projection * projection));
-            var bendDirection = Vector3.ProjectOnPlane(
-                poleTarget - rootPosition,
-                targetDirection);
-            if (bendDirection.sqrMagnitude < 0.00000001f)
-            {
-                bendDirection = Vector3.ProjectOnPlane(
-                    rootToMid,
-                    targetDirection);
-            }
-
-            if (bendDirection.sqrMagnitude < 0.00000001f)
-            {
-                bendDirection = Vector3.Cross(targetDirection, Vector3.up);
-            }
-
-            if (bendDirection.sqrMagnitude < 0.00000001f)
-            {
-                bendDirection = Vector3.Cross(targetDirection, Vector3.forward);
-            }
-
-            bendDirection.Normalize();
-            var desiredMid = rootPosition + targetDirection * projection +
-                             bendDirection * height;
-            var rootDelta = Quaternion.FromToRotation(
-                rootToMid,
-                desiredMid - rootPosition);
-            pose.SetWorldRotation(
-                limb.RootIndex,
-                rootDelta * pose.GetWorldRotation(limb.RootIndex));
-
-            midPosition = pose.GetWorldPosition(limb.MidIndex);
-            tipPosition = pose.GetWorldPosition(limb.TipIndex);
-            var solvedTarget = rootPosition + targetDirection * solvedDistance;
-            var currentMidToTip = tipPosition - midPosition;
-            var desiredMidToTip = solvedTarget - midPosition;
-            if (currentMidToTip.sqrMagnitude > 0.00000001f &&
-                desiredMidToTip.sqrMagnitude > 0.00000001f)
-            {
-                var midDelta = Quaternion.FromToRotation(
-                    currentMidToTip,
-                    desiredMidToTip);
-                pose.SetWorldRotation(
-                    limb.MidIndex,
-                    midDelta * pose.GetWorldRotation(limb.MidIndex));
-            }
-
-            pose.SetWorldRotation(limb.TipIndex, tipWorldRotation);
         }
 
         private static IReadOnlyList<LimbChain> BuildLimbs(
@@ -383,7 +298,13 @@ namespace BodyEditor.Characters.Constraints
                     tip,
                     radius,
                     radius * 1.25f,
-                    radius));
+                    radius,
+                    CharacterTwoBoneSettings.CreateHumanoid(
+                        skeleton,
+                        root,
+                        mid,
+                        tip,
+                        midBone)));
             }
         }
 
@@ -395,7 +316,8 @@ namespace BodyEditor.Characters.Constraints
                 int tipIndex,
                 float jointRadius,
                 float endpointRadius,
-                float segmentRadius)
+                float segmentRadius,
+                CharacterTwoBoneSettings twoBoneSettings)
             {
                 RootIndex = rootIndex;
                 MidIndex = midIndex;
@@ -403,6 +325,7 @@ namespace BodyEditor.Characters.Constraints
                 JointRadius = jointRadius;
                 EndpointRadius = endpointRadius;
                 SegmentRadius = segmentRadius;
+                TwoBoneSettings = twoBoneSettings;
             }
 
             public int RootIndex { get; }
@@ -411,6 +334,7 @@ namespace BodyEditor.Characters.Constraints
             public float JointRadius { get; }
             public float EndpointRadius { get; }
             public float SegmentRadius { get; }
+            public CharacterTwoBoneSettings TwoBoneSettings { get; }
         }
 
         private readonly struct CapsuleVolume

@@ -76,7 +76,7 @@ namespace BodyEditor.ReferenceModels
             string name,
             string target,
             ReferenceTimelineTrackKind kind,
-            int keyframeCount,
+            IReadOnlyList<float> keyframeTimes,
             bool enabled,
             bool supported,
             string status = null)
@@ -85,7 +85,11 @@ namespace BodyEditor.ReferenceModels
             Name = name ?? string.Empty;
             Target = target ?? string.Empty;
             Kind = kind;
-            KeyframeCount = keyframeCount;
+            var times = keyframeTimes == null
+                ? Array.Empty<float>()
+                : new List<float>(keyframeTimes).ToArray();
+            Array.Sort(times);
+            KeyframeTimes = Array.AsReadOnly(times);
             Enabled = enabled;
             Supported = supported;
             Status = status ?? string.Empty;
@@ -99,7 +103,9 @@ namespace BodyEditor.ReferenceModels
 
         public ReferenceTimelineTrackKind Kind { get; }
 
-        public int KeyframeCount { get; }
+        public int KeyframeCount => KeyframeTimes.Count;
+
+        public IReadOnlyList<float> KeyframeTimes { get; }
 
         public bool Enabled { get; private set; }
 

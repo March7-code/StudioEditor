@@ -39,6 +39,9 @@ Current foundation slice:
 - Added an analytic body-collision modifier in the `BodyConstraints` stage. It fits
   conservative head, torso, and pelvis volumes, then projects elbow, hand, knee, foot,
   and limb-segment samples out of those volumes before writing corrected limb IK.
+- Control-point IK and body-collision correction now share one two-bone solver and one
+  humanoid chain configuration. Elbows and knees keep their bind-pose bend side and
+  use hard bend ranges of `2-165` and `2-155` degrees respectively.
 - The preliminary collision slice creates no Rigidbody, Joint, or Unity Collider and
   remains deterministic during Timeline seeking. Clothing, hair, fingers, the floor,
   limb-to-limb pairs, and inter-character collision remain excluded.

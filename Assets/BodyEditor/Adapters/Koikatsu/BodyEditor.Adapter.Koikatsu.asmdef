@@ -3,7 +3,8 @@
   "rootNamespace": "BodyEditor",
   "references": [
     "BodyEditor.Runtime",
-    "BodyEditor.Characters"
+    "BodyEditor.Characters",
+    "BodyEditor.Rendering"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

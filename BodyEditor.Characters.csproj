@@ -16,9 +16,9 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <EnableDefaultItems>false</EnableDefaultItems>
     <LangVersion>9.0</LangVersion>
-    <RootNamespace>BodyEditor</RootNamespace>
+    <RootNamespace>BodyEditor.Characters</RootNamespace>
     <OutputType>Library</OutputType>
-    <AssemblyName>BodyEditor.Runtime</AssemblyName>
+    <AssemblyName>BodyEditor.Characters</AssemblyName>
     <TargetFramework>netstandard2.1</TargetFramework>
     <BaseDirectory>.</BaseDirectory>
   </PropertyGroup>
@@ -53,35 +53,18 @@
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorSidebar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\BodyEditorViewport.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\BodySectionField.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Editing\EditableSkeletonController.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelPresentation.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonSchema.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Editing\CharacterControlPointController.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Editing\CharacterBodyConstraintController.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ViewportControls.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeleton.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\AssemblyInfo.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\ViewportAxisGizmo.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonFactory.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\BodySkeletonSidebar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelOverlays.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceMeshTopology.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\WindowsModelFilePicker.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelImport.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\ReferenceModelSidebar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Legacy\Characters\LegacyCharacterModelBridge.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorTopBar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelAdapterRegistry.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceSectionRings.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\ReferenceTimelinePanel.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Pose\CharacterPoseLayer.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Constraints\CharacterBodyConstraintRig.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Pose\CharacterPoseCoordinator.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\CharacterModel.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Kinematics\CharacterTwoBoneSolver.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\CharacterSkeleton.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Pose\CharacterPoseBuffer.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Controls\CharacterControlRig.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\CharacterGeometry.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Assets\BodyEditor\Runtime\BodyEditor.Runtime.asmdef" />
-    <None Include="Assets\BodyEditor\Runtime\UI\Resources\BodyEditorOverlay.shader" />
-    <None Include="Assets\BodyEditor\Runtime\UI\Resources\BodyEditorTopBar.uss" />
+    <None Include="Assets\BodyEditor\Runtime\Characters\BodyEditor.Characters.asmdef" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">
@@ -1282,7 +1265,6 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="BodyEditor.Characters.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

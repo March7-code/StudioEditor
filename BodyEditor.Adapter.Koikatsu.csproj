@@ -18,7 +18,7 @@
     <LangVersion>9.0</LangVersion>
     <RootNamespace>BodyEditor</RootNamespace>
     <OutputType>Library</OutputType>
-    <AssemblyName>BodyEditor.Runtime</AssemblyName>
+    <AssemblyName>BodyEditor.Adapter.Koikatsu</AssemblyName>
     <TargetFramework>netstandard2.1</TargetFramework>
     <BaseDirectory>.</BaseDirectory>
   </PropertyGroup>
@@ -53,35 +53,44 @@
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorSidebar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\BodyEditorViewport.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\BodySectionField.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Editing\EditableSkeletonController.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelPresentation.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonSchema.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Editing\CharacterControlPointController.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Editing\CharacterBodyConstraintController.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ViewportControls.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeleton.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\AssemblyInfo.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\ViewportAxisGizmo.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonFactory.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\BodySkeletonSidebar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelOverlays.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceMeshTopology.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\WindowsModelFilePicker.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelImport.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\ReferenceModelSidebar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\Legacy\Characters\LegacyCharacterModelBridge.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorTopBar.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelAdapterRegistry.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceSectionRings.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\UI\ReferenceTimelinePanel.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuCharacterAssembler.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuLegacyBundleSanitizer.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuTimelinePlayer.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioCharacterPose.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuEyeTextureBaker.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioBundleDependencies.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuMaterialConverter.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuVirtualAssetLoader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuBodyBoneProfile.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuTimelineSceneReader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioItemMetadata.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuCardReader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuBodyMaskBaker.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuClothesRendererMap.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuListCatalog.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuPartLoader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioPatternLoader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuShapeApplicator.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioSceneLoader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuReferenceModelAdapter.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioItemAppearance.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuClothesTextureBaker.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\AssemblyInfo.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioItemLoader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuAssetBundleCache.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuCard.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuSceneReader.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Assets\BodyEditor\Runtime\BodyEditor.Runtime.asmdef" />
-    <None Include="Assets\BodyEditor\Runtime\UI\Resources\BodyEditorOverlay.shader" />
-    <None Include="Assets\BodyEditor\Runtime\UI\Resources\BodyEditorTopBar.uss" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Resources\Shaders\KoikatsuEyeBake.shader" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\BodyEditor.Adapter.Koikatsu.asmdef" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Plugins\MessagePack.LICENSE.txt" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Resources\Shaders\KoikatsuStudioItem.shader" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Resources\Shaders\KoikatsuClothesBake.shader" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Resources\Shaders\KoikatsuBodyMaskBake.shader" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.LICENSE.txt" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Plugins\MessagePack.dll" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">
@@ -676,72 +685,12 @@
       <HintPath>F:\Unity\Editor\Data\PlaybackEngines\MetroSupport\UnityEditor.UWP.Extensions.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="MessagePack">
+      <HintPath>Assets\BodyEditor\Adapters\Koikatsu\Plugins\MessagePack.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="AssetsTools.NET">
       <HintPath>Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="TextMateSharpPlastic">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\TextMateSharp\TextMateSharpPlastic.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="TextMateSharpPlastic.Grammars">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\TextMateSharp\TextMateSharpPlastic.Grammars.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.VisualScripting.YamlDotNet">
-      <HintPath>Library\PackageCache\com.unity.visualscripting@8bed5ad90189\Editor\VisualScripting.Core\Dependencies\YamlDotNet\Unity.VisualScripting.YamlDotNet.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.Collections.LowLevel.ILSupport">
-      <HintPath>Library\PackageCache\com.unity.collections@a43cabe808ca\Unity.Collections.LowLevel.ILSupport\Unity.Collections.LowLevel.ILSupport.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.Plastic.Antlr3.Runtime">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\Unity.Plastic.Antlr3.Runtime.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="OnigwrapPlastic">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\TextMateSharp\Onigwrap\OnigwrapPlastic.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="nunit.framework">
-      <HintPath>Library\PackageCache\com.unity.ext.nunit@44f7d31723bd\net472\unity-custom\nunit.framework.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.Plastic.Newtonsoft.Json">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\Unity.Plastic.Newtonsoft.Json.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="log4netPlastic">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\log4netPlastic.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.VisualScripting.IonicZip">
-      <HintPath>Library\PackageCache\com.unity.visualscripting@8bed5ad90189\Editor\VisualScripting.Core\Dependencies\DotNetZip\Unity.VisualScripting.IonicZip.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="unityplastic">
-      <HintPath>Library\PackageCache\com.unity.collab-proxy@0b1559bcd34e\Lib\Editor\unityplastic.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.VisualScripting.Antlr3.Runtime">
-      <HintPath>Library\PackageCache\com.unity.visualscripting@8bed5ad90189\Runtime\VisualScripting.Flow\Dependencies\NCalc\Unity.VisualScripting.Antlr3.Runtime.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Newtonsoft.Json">
-      <HintPath>Library\PackageCache\com.unity.nuget.newtonsoft-json@4dfd81071c64\Runtime\Newtonsoft.Json.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Unity.VisualScripting.TextureAssets">
-      <HintPath>Library\PackageCache\com.unity.visualscripting@8bed5ad90189\Editor\VisualScripting.Core\EditorAssetResources\Unity.VisualScripting.TextureAssets.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Mono.Cecil">
-      <HintPath>Library\PackageCache\com.unity.nuget.mono-cecil@ecb9724e46ff\Mono.Cecil.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="LibNMeCab">
-      <HintPath>Library\PackageCache\com.candidumgames.unitymmdtools@6509c94f4e42\ThirdParty\Kawazu\LibNMeCab.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="netstandard">
@@ -1282,7 +1231,9 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="BodyEditor.Runtime.csproj" />
     <ProjectReference Include="BodyEditor.Characters.csproj" />
+    <ProjectReference Include="BodyEditor.Rendering.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

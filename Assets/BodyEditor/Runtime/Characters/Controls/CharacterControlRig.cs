@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BodyEditor.Characters.Kinematics;
 using UnityEngine;
 
 namespace BodyEditor.Characters.Controls
@@ -367,7 +368,16 @@ namespace BodyEditor.Characters.Controls
             var rotation = state.RotationActive
                 ? state.TargetRotation
                 : pose.GetWorldRotation(definition.TipIndex);
-            SolveTwoBone(pose, definition, state.Target, null, rotation);
+            CharacterTwoBoneSolver.Solve(
+                pose,
+                definition.RootIndex,
+                definition.MidIndex,
+                definition.TipIndex,
+                state.Target,
+                null,
+                rotation,
+                definition.TwoBoneSettings,
+                poseLayer);
         }
 
         private void SolveShoulder(
@@ -425,12 +435,16 @@ namespace BodyEditor.Characters.Controls
             var rotation = endpointState.Active && endpointState.RotationActive
                 ? endpointState.TargetRotation
                 : pose.GetWorldRotation(definition.TipIndex);
-            SolveTwoBone(
+            CharacterTwoBoneSolver.Solve(
                 pose,
-                definition,
+                definition.RootIndex,
+                definition.MidIndex,
+                definition.TipIndex,
                 target,
                 poleState.Active ? poleState.Target : (Vector3?)null,
-                rotation);
+                rotation,
+                definition.TwoBoneSettings,
+                poseLayer);
         }
 
         private bool TryGetActiveState(
@@ -464,112 +478,6 @@ namespace BodyEditor.Characters.Controls
                     pose.SetLocalRotation(pair.Key, baseline.LocalRotation);
                 }
             }
-        }
-
-        private void SolveTwoBone(
-            CharacterPoseBuffer pose,
-            ControlDefinition definition,
-            Vector3 requestedTarget,
-            Vector3? poleTarget,
-            Quaternion tipWorldRotation)
-        {
-            var rootPosition = pose.GetWorldPosition(definition.RootIndex);
-            var midPosition = pose.GetWorldPosition(definition.MidIndex);
-            var tipPosition = pose.GetWorldPosition(definition.TipIndex);
-            var rootToMid = midPosition - rootPosition;
-            var midToTip = tipPosition - midPosition;
-            var firstLength = rootToMid.magnitude;
-            var secondLength = midToTip.magnitude;
-            if (firstLength < 0.00001f || secondLength < 0.00001f)
-            {
-                return;
-            }
-
-            var targetVector = requestedTarget - rootPosition;
-            var requestedDistance = targetVector.magnitude;
-            if (requestedDistance < 0.00001f)
-            {
-                targetVector = rootToMid + midToTip;
-                requestedDistance = targetVector.magnitude;
-                if (requestedDistance < 0.00001f)
-                {
-                    return;
-                }
-            }
-
-            var targetDirection = targetVector / requestedDistance;
-            var minDistance = Mathf.Abs(firstLength - secondLength) + 0.00001f;
-            var maxDistance = firstLength + secondLength - 0.00001f;
-            var solvedDistance = Mathf.Clamp(
-                requestedDistance,
-                minDistance,
-                maxDistance);
-            var projection =
-                (firstLength * firstLength + solvedDistance * solvedDistance -
-                 secondLength * secondLength) /
-                (2f * solvedDistance);
-            var heightSquared = Mathf.Max(
-                0f,
-                firstLength * firstLength - projection * projection);
-
-            var bendSource = poleTarget.HasValue
-                ? poleTarget.Value - rootPosition
-                : rootToMid;
-            var bendDirection = Vector3.ProjectOnPlane(
-                bendSource,
-                targetDirection);
-            if (bendDirection.sqrMagnitude < 0.00000001f)
-            {
-                var bendNormal = Vector3.Cross(rootToMid, midToTip);
-                if (bendNormal.sqrMagnitude < 0.00000001f)
-                {
-                    bendNormal = Vector3.Cross(
-                        targetDirection,
-                        model.Root != null
-                            ? model.Root.transform.forward
-                            : Vector3.forward);
-                }
-
-                if (bendNormal.sqrMagnitude < 0.00000001f)
-                {
-                    bendNormal = Vector3.Cross(targetDirection, Vector3.up);
-                }
-
-                bendDirection = Vector3.Cross(
-                    bendNormal.normalized,
-                    targetDirection);
-            }
-
-            bendDirection.Normalize();
-            var desiredMid = rootPosition + targetDirection * projection +
-                             bendDirection * Mathf.Sqrt(heightSquared);
-
-            var rootDelta = Quaternion.FromToRotation(
-                rootToMid,
-                desiredMid - rootPosition);
-            ApplyWorldRotation(
-                pose,
-                definition.RootIndex,
-                rootDelta * pose.GetWorldRotation(definition.RootIndex));
-
-            midPosition = pose.GetWorldPosition(definition.MidIndex);
-            tipPosition = pose.GetWorldPosition(definition.TipIndex);
-            var solvedTarget = rootPosition + targetDirection * solvedDistance;
-            var currentMidToTip = tipPosition - midPosition;
-            var desiredMidToTip = solvedTarget - midPosition;
-            if (currentMidToTip.sqrMagnitude > 0.00000001f &&
-                desiredMidToTip.sqrMagnitude > 0.00000001f)
-            {
-                var midDelta = Quaternion.FromToRotation(
-                    currentMidToTip,
-                    desiredMidToTip);
-                ApplyWorldRotation(
-                    pose,
-                    definition.MidIndex,
-                    midDelta * pose.GetWorldRotation(definition.MidIndex));
-            }
-
-            ApplyWorldRotation(pose, definition.TipIndex, tipWorldRotation);
         }
 
         private void ApplyWorldPosition(
@@ -744,19 +652,42 @@ namespace BodyEditor.Characters.Controls
                     HumanBodyBones.UpperChest,
                     out var spine,
                     out var chest,
-                    out var upperChest) ||
-                TryChain(
-                    skeleton,
-                    HumanBodyBones.Hips,
-                    HumanBodyBones.Spine,
-                    HumanBodyBones.Chest,
-                    out spine,
-                    out chest,
-                    out upperChest))
+                    out var upperChest))
             {
                 definitions.Add(
                     CharacterControlPoint.Chest,
-                    ControlDefinition.TwoBone(spine, chest, upperChest));
+                    ControlDefinition.TwoBone(
+                        spine,
+                        chest,
+                        upperChest,
+                        CharacterTwoBoneSettings.CreateHumanoid(
+                            skeleton,
+                            spine,
+                            chest,
+                            upperChest,
+                            HumanBodyBones.Chest)));
+            }
+            else if (TryChain(
+                         skeleton,
+                         HumanBodyBones.Hips,
+                         HumanBodyBones.Spine,
+                         HumanBodyBones.Chest,
+                         out spine,
+                         out chest,
+                         out upperChest))
+            {
+                definitions.Add(
+                    CharacterControlPoint.Chest,
+                    ControlDefinition.TwoBone(
+                        spine,
+                        chest,
+                        upperChest,
+                        CharacterTwoBoneSettings.CreateHumanoid(
+                            skeleton,
+                            spine,
+                            chest,
+                            upperChest,
+                            HumanBodyBones.Spine)));
             }
 
             var torso = TryIndex(
@@ -773,7 +704,16 @@ namespace BodyEditor.Characters.Controls
             {
                 definitions.Add(
                     CharacterControlPoint.Head,
-                    ControlDefinition.TwoBone(torso, neck, head));
+                    ControlDefinition.TwoBone(
+                        torso,
+                        neck,
+                        head,
+                        CharacterTwoBoneSettings.CreateHumanoid(
+                            skeleton,
+                            torso,
+                            neck,
+                            head,
+                            HumanBodyBones.Neck)));
             }
 
             // Shoulder targets stay unavailable until the inferred pose layer can
@@ -826,12 +766,18 @@ namespace BodyEditor.Characters.Controls
                     out var mid,
                     out var tip))
             {
+                var settings = CharacterTwoBoneSettings.CreateHumanoid(
+                    skeleton,
+                    root,
+                    mid,
+                    tip,
+                    midBone);
                 definitions.Add(
                     endpoint,
-                    ControlDefinition.TwoBone(root, mid, tip));
+                    ControlDefinition.TwoBone(root, mid, tip, settings));
                 definitions.Add(
                     pole,
-                    ControlDefinition.Pole(root, mid, tip));
+                    ControlDefinition.Pole(root, mid, tip, settings));
             }
         }
 
@@ -954,7 +900,8 @@ namespace BodyEditor.Characters.Controls
                 int rotationIndex,
                 CharacterPoseChannels rootChannels,
                 CharacterPoseChannels midChannels,
-                CharacterPoseChannels tipChannels)
+                CharacterPoseChannels tipChannels,
+                CharacterTwoBoneSettings twoBoneSettings = default)
             {
                 Solver = solver;
                 AnchorIndex = anchorIndex;
@@ -965,6 +912,7 @@ namespace BodyEditor.Characters.Controls
                 RootChannels = rootChannels;
                 MidChannels = midChannels;
                 TipChannels = tipChannels;
+                TwoBoneSettings = twoBoneSettings;
             }
 
             public ControlSolver Solver { get; }
@@ -976,6 +924,7 @@ namespace BodyEditor.Characters.Controls
             public CharacterPoseChannels RootChannels { get; }
             public CharacterPoseChannels MidChannels { get; }
             public CharacterPoseChannels TipChannels { get; }
+            public CharacterTwoBoneSettings TwoBoneSettings { get; }
 
             public static ControlDefinition Hips(int index)
             {
@@ -991,7 +940,11 @@ namespace BodyEditor.Characters.Controls
                     CharacterPoseChannels.None);
             }
 
-            public static ControlDefinition TwoBone(int root, int mid, int tip)
+            public static ControlDefinition TwoBone(
+                int root,
+                int mid,
+                int tip,
+                CharacterTwoBoneSettings settings)
             {
                 return new ControlDefinition(
                     ControlSolver.TwoBone,
@@ -1002,7 +955,8 @@ namespace BodyEditor.Characters.Controls
                     tip,
                     CharacterPoseChannels.Rotation,
                     CharacterPoseChannels.Rotation,
-                    CharacterPoseChannels.Rotation);
+                    CharacterPoseChannels.Rotation,
+                    settings);
             }
 
             public static ControlDefinition OneBone(int root, int tip)
@@ -1019,7 +973,11 @@ namespace BodyEditor.Characters.Controls
                     CharacterPoseChannels.Rotation);
             }
 
-            public static ControlDefinition Pole(int root, int mid, int tip)
+            public static ControlDefinition Pole(
+                int root,
+                int mid,
+                int tip,
+                CharacterTwoBoneSettings settings)
             {
                 return new ControlDefinition(
                     ControlSolver.Pole,
@@ -1030,7 +988,8 @@ namespace BodyEditor.Characters.Controls
                     -1,
                     CharacterPoseChannels.Rotation,
                     CharacterPoseChannels.Rotation,
-                    CharacterPoseChannels.Rotation);
+                    CharacterPoseChannels.Rotation,
+                    settings);
             }
         }
 

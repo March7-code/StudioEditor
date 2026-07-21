@@ -53,9 +53,14 @@
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuZipmodArchiveTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuLegacyBundleSanitizerTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\ReferenceMeshTopologyTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\HumanoidSkeletonTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\CharacterRenderSchemeTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\ReferenceSectionRingTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuTimelineSceneReaderTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuEyeTextureBakerTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\BodyEditor\Tests\Editor\BodyEditor.Tests.Editor.asmdef" />
@@ -1229,6 +1234,9 @@
   <ItemGroup>
     <ProjectReference Include="BodyEditor.Runtime.csproj" />
     <ProjectReference Include="BodyEditor.Editor.csproj" />
+    <ProjectReference Include="BodyEditor.Adapter.Koikatsu.csproj" />
+    <ProjectReference Include="BodyEditor.Rendering.csproj" />
+    <ProjectReference Include="BodyEditor.RenderScheme.DefaultAnime.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

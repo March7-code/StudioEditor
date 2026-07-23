@@ -1,0 +1,19 @@
+{
+  "name": "StudioEditor.Adapter.Pmx",
+  "rootNamespace": "StudioEditor",
+  "references": [
+    "StudioEditor.Runtime",
+    "StudioEditor.Characters",
+    "UMT.Runtime",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

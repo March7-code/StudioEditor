@@ -1,0 +1,14 @@
+{
+  "name": "StudioEditor.Rendering",
+  "rootNamespace": "StudioEditor.Rendering",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

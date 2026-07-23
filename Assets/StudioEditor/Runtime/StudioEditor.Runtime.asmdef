@@ -1,0 +1,17 @@
+{
+  "name": "StudioEditor.Runtime",
+  "rootNamespace": "StudioEditor",
+  "references": [
+    "StudioEditor.Characters",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

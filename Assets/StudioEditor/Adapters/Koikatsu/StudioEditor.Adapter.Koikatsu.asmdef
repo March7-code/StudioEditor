@@ -1,0 +1,21 @@
+{
+  "name": "StudioEditor.Adapter.Koikatsu",
+  "rootNamespace": "StudioEditor",
+  "references": [
+    "StudioEditor.Runtime",
+    "StudioEditor.Characters",
+    "StudioEditor.Rendering"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "MessagePack.dll",
+    "AssetsTools.NET.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

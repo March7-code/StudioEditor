@@ -1,4 +1,4 @@
-﻿<Project>
+<Project>
   <!-- Generated file, do not modify, your changes will be overwritten (use AssetPostprocessor.OnGeneratedCSProject) -->
   <PropertyGroup>
     <BaseIntermediateOutputPath>Temp\obj\$(MSBuildProjectName)</BaseIntermediateOutputPath>
@@ -713,7 +713,7 @@
       <Private>False</Private>
     </Reference>
     <Reference Include="AssetsTools.NET">
-      <HintPath>Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll</HintPath>
+      <HintPath>Assets\StudioEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="TextMateSharpPlastic">
@@ -1567,13 +1567,13 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Assembly-CSharp-firstpass.csproj" />
-    <ProjectReference Include="BodyEditor.Rendering.csproj" />
-    <ProjectReference Include="BodyEditor.Adapter.Koikatsu.csproj" />
-    <ProjectReference Include="BodyEditor.RenderScheme.DefaultAnime.csproj" />
-    <ProjectReference Include="BodyEditor.Adapter.Pmx.csproj" />
-    <ProjectReference Include="BodyEditor.Characters.csproj" />
-    <ProjectReference Include="BodyEditor.Runtime.csproj" />
-    <ProjectReference Include="BodyEditor.Editor.csproj" />
+    <ProjectReference Include="StudioEditor.Rendering.csproj" />
+    <ProjectReference Include="StudioEditor.Adapter.Koikatsu.csproj" />
+    <ProjectReference Include="StudioEditor.RenderScheme.DefaultAnime.csproj" />
+    <ProjectReference Include="StudioEditor.Adapter.Pmx.csproj" />
+    <ProjectReference Include="StudioEditor.Characters.csproj" />
+    <ProjectReference Include="StudioEditor.Runtime.csproj" />
+    <ProjectReference Include="StudioEditor.Editor.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

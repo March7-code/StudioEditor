@@ -786,9 +786,14 @@ namespace StudioEditor.ReferenceModels
 
         private void LateUpdate()
         {
-            // Non-bone targets must update before the late pose coordinator uses
-            // them as IK or controller targets.
-            SampleDirectBindings(CurrentTime);
+            // Seek already samples paused timelines. Reapplying them every late
+            // frame would pin imported IK targets and expression controls while
+            // the user is trying to edit the current pose.
+            if (IsPlaying)
+            {
+                SampleDirectBindings(CurrentTime);
+            }
+
             nodeConstraints?.EvaluateNow();
             for (var index = 0; index < itemPoses.Count; index++)
             {

@@ -43,6 +43,7 @@ namespace StudioEditor.Characters.Controls
 
         private readonly ICharacterModel model;
         private readonly ICharacterPosePipeline coordinator;
+        private readonly ICharacterKinematicGroupController kinematics;
         private readonly CharacterPoseLayer poseLayer;
         private readonly ControlPoseModifier modifier;
         private readonly Dictionary<CharacterControlPoint, ControlDefinition>
@@ -55,6 +56,7 @@ namespace StudioEditor.Characters.Controls
         private readonly IReadOnlyList<CharacterControlPoint> controlPoints;
         private bool enabled = true;
         private bool disposed;
+        private CharacterKinematicGroups suspendedIkGroups;
 
         public CharacterControlRig(ICharacterModel model)
         {
@@ -70,6 +72,8 @@ namespace StudioEditor.Characters.Controls
                     "Character pose coordinator is not initialized for its skeleton.",
                     nameof(model));
             }
+
+            kinematics = model as ICharacterKinematicGroupController;
 
             BuildDefinitions(model.Skeleton);
             var values = new List<CharacterControlPoint>();
@@ -120,6 +124,11 @@ namespace StudioEditor.Characters.Controls
                 {
                     RestoreAllBaselinesToTransforms();
                     poseLayer.Clear();
+                    RestoreAllKinematicGroups();
+                }
+                else
+                {
+                    SuspendActiveKinematicGroups();
                 }
 
                 coordinator.EvaluateNow();
@@ -205,6 +214,7 @@ namespace StudioEditor.Characters.Controls
             var state = states[point];
             if (!state.Active)
             {
+                SuspendKinematicGroup(point);
                 CaptureBaselines(definition);
                 state.Active = true;
                 state.TargetRotation = definition.RotationIndex >= 0
@@ -232,6 +242,7 @@ namespace StudioEditor.Characters.Controls
             var state = states[point];
             if (!state.Active)
             {
+                SuspendKinematicGroup(point);
                 CaptureBaselines(definition);
                 state.Active = true;
                 state.Target = GetBoneWorldPosition(definition.AnchorIndex);
@@ -256,6 +267,7 @@ namespace StudioEditor.Characters.Controls
 
             states[point] = default;
             RestoreReleasedBaselines();
+            RestoreReleasedKinematicGroups();
             coordinator.EvaluateNow();
             return true;
         }
@@ -282,6 +294,7 @@ namespace StudioEditor.Characters.Controls
             }
 
             RestoreReleasedBaselines();
+            RestoreReleasedKinematicGroups();
             coordinator.EvaluateNow();
         }
 
@@ -295,6 +308,7 @@ namespace StudioEditor.Characters.Controls
             disposed = true;
             RestoreAllBaselinesToTransforms();
             poseLayer.Clear();
+            RestoreAllKinematicGroups();
             if (coordinator != null)
             {
                 coordinator.UnregisterModifier(modifier);
@@ -305,6 +319,115 @@ namespace StudioEditor.Characters.Controls
             baselines.Clear();
             states.Clear();
             definitions.Clear();
+        }
+
+        private void SuspendActiveKinematicGroups()
+        {
+            for (var index = 0; index < controlPoints.Count; index++)
+            {
+                var point = controlPoints[index];
+                if (states[point].Active)
+                {
+                    SuspendKinematicGroup(point);
+                }
+            }
+        }
+
+        private void SuspendKinematicGroup(CharacterControlPoint point)
+        {
+            if (!enabled || kinematics == null)
+            {
+                return;
+            }
+
+            var group = KinematicGroupFor(point);
+            if (group == CharacterKinematicGroups.None ||
+                (suspendedIkGroups & group) != 0 ||
+                (kinematics.GetActiveGroups(
+                     CharacterKinematicMode.InverseKinematics) & group) == 0)
+            {
+                return;
+            }
+
+            suspendedIkGroups |= group;
+            kinematics.SetGroupActive(
+                CharacterKinematicMode.InverseKinematics,
+                group,
+                false);
+        }
+
+        private void RestoreReleasedKinematicGroups()
+        {
+            var activeGroups = CharacterKinematicGroups.None;
+            for (var index = 0; index < controlPoints.Count; index++)
+            {
+                var point = controlPoints[index];
+                if (states[point].Active)
+                {
+                    activeGroups |= KinematicGroupFor(point);
+                }
+            }
+
+            RestoreKinematicGroups(suspendedIkGroups & ~activeGroups);
+        }
+
+        private void RestoreAllKinematicGroups()
+        {
+            RestoreKinematicGroups(suspendedIkGroups);
+        }
+
+        private void RestoreKinematicGroups(CharacterKinematicGroups groups)
+        {
+            if (groups == CharacterKinematicGroups.None)
+            {
+                return;
+            }
+
+            suspendedIkGroups &= ~groups;
+            if (kinematics == null || model.Root == null)
+            {
+                return;
+            }
+
+            groups &= kinematics.GetSupportedGroups(
+                CharacterKinematicMode.InverseKinematics);
+            if (groups == CharacterKinematicGroups.None)
+            {
+                return;
+            }
+
+            kinematics.SetGroupActive(
+                CharacterKinematicMode.InverseKinematics,
+                groups,
+                true);
+        }
+
+        private static CharacterKinematicGroups KinematicGroupFor(
+            CharacterControlPoint point)
+        {
+            switch (point)
+            {
+                case CharacterControlPoint.Hips:
+                case CharacterControlPoint.Chest:
+                case CharacterControlPoint.Head:
+                case CharacterControlPoint.LeftShoulder:
+                case CharacterControlPoint.RightShoulder:
+                    return CharacterKinematicGroups.Body;
+                case CharacterControlPoint.LeftHand:
+                case CharacterControlPoint.LeftElbow:
+                    return CharacterKinematicGroups.LeftHand;
+                case CharacterControlPoint.RightHand:
+                case CharacterControlPoint.RightElbow:
+                    return CharacterKinematicGroups.RightHand;
+                case CharacterControlPoint.LeftFoot:
+                case CharacterControlPoint.LeftKnee:
+                    return CharacterKinematicGroups.LeftLeg;
+                case CharacterControlPoint.RightFoot:
+                case CharacterControlPoint.RightKnee:
+                    return CharacterKinematicGroups.RightLeg;
+                default:
+                    return CharacterKinematicGroups.None;
+            }
         }
 
         private void Evaluate(CharacterPoseBuffer pose)

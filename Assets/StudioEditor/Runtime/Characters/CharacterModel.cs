@@ -154,7 +154,11 @@ namespace StudioEditor.Characters
 
         Transform Target { get; }
 
+        Transform ManualTarget { get; }
+
         void SetTarget(Transform target);
+
+        void SetManualTarget(Transform target);
 
         void SetFollowTarget(bool enabled);
     }

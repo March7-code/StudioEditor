@@ -279,7 +279,7 @@ namespace StudioEditor.ReferenceModels
             ReadBytesExact(reader, 5, "character moisture");
             character.MouthOpen = reader.ReadSingle();
             character.LipSync = reader.ReadBoolean();
-            SkipLookAtTarget(reader);
+            character.LookAtTarget = ReadBone(reader);
             character.EnableIK = reader.ReadBoolean();
             character.ActiveIK = ReadBooleans(reader, 5);
             character.EnableFK = reader.ReadBoolean();
@@ -415,12 +415,6 @@ namespace StudioEditor.ReferenceModels
         }
 
         private static void SkipBone(BinaryReader reader)
-        {
-            reader.ReadInt32();
-            SkipChangeAmount(reader);
-        }
-
-        private static void SkipLookAtTarget(BinaryReader reader)
         {
             reader.ReadInt32();
             SkipChangeAmount(reader);
@@ -1380,6 +1374,8 @@ namespace StudioEditor.ReferenceModels
         public float MouthOpen { get; internal set; }
 
         public bool LipSync { get; internal set; }
+
+        public KoikatsuSceneBone LookAtTarget { get; internal set; }
 
         public IReadOnlyList<bool> ExpressionEnabled { get; internal set; }
 

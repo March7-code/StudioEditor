@@ -54,12 +54,15 @@ namespace StudioEditor.Characters
             Array.Empty<CharacterPupilMaterialTarget>();
         private ICharacterPosePipeline coordinator;
         private Transform target;
+        private Transform manualTarget;
         private bool isFollowingTarget;
         private bool configured;
 
         public bool IsFollowingTarget => isFollowingTarget;
 
         public Transform Target => target;
+
+        public Transform ManualTarget => manualTarget;
 
         public float LeftMinHorizontalAngle { get; set; } = -18f;
 
@@ -197,6 +200,13 @@ namespace StudioEditor.Characters
         public void SetTarget(Transform value)
         {
             target = value;
+            coordinator?.EvaluateNow();
+        }
+
+        public void SetManualTarget(Transform value)
+        {
+            manualTarget = value;
+            coordinator?.EvaluateNow();
         }
 
         public void ConfigurePupils(
@@ -224,6 +234,7 @@ namespace StudioEditor.Characters
         public void SetFollowTarget(bool enabled)
         {
             isFollowingTarget = enabled;
+            coordinator?.EvaluateNow();
         }
 
         public void SetFixedLocalRotations(
@@ -257,10 +268,13 @@ namespace StudioEditor.Characters
                 return;
             }
 
-            var followsTarget = isFollowingTarget && target != null;
+            var activeTarget = isFollowingTarget
+                ? target
+                : manualTarget;
+            var followsTarget = activeTarget != null;
             for (var index = 0; index < eyes.Length; index++)
             {
-                ApplyEye(pose, eyes[index], followsTarget);
+                ApplyEye(pose, eyes[index], activeTarget, followsTarget);
             }
 
             ApplyPupilOffsets();
@@ -269,6 +283,7 @@ namespace StudioEditor.Characters
         private void ApplyEye(
             CharacterPoseBuffer pose,
             EyeState eye,
+            Transform activeTarget,
             bool followsTarget)
         {
             var capturedRotation = pose.GetLocalRotation(eye.BoneIndex);
@@ -290,7 +305,7 @@ namespace StudioEditor.Characters
                 ? CalculateTargetDelta(
                     pose,
                     eye,
-                    target.position,
+                    activeTarget.position,
                     out horizontalRate,
                     out verticalRate)
                 : usesFixedRotation

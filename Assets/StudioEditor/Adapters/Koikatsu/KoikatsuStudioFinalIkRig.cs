@@ -264,17 +264,19 @@ namespace StudioEditor.ReferenceModels
 
             if (fullBodyIk.SolverInitiated)
             {
-                // The component is intentionally disabled so Final IK cannot
-                // run from its own LateUpdate. That also bypasses
-                // SolverManager's automatic FixTransforms call, which is
-                // required to restore animated bones before every solve.
-                if (fullBodyIk.FixTransforms)
-                {
-                    fullBodyIk.FixSolverTransforms();
-                }
-
                 fullBodyIk.UpdateSolver();
             }
+        }
+
+        public void FixTransforms()
+        {
+            if (!active || fullBodyIk == null || !fullBodyIk.IsAlive ||
+                !fullBodyIk.FixTransforms || !fullBodyIk.SolverInitiated)
+            {
+                return;
+            }
+
+            fullBodyIk.FixSolverTransforms();
         }
 
         public void Disable()

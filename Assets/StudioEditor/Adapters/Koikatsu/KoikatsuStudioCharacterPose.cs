@@ -6,6 +6,7 @@ using UnityEngine;
 
 namespace StudioEditor.ReferenceModels
 {
+    [DefaultExecutionOrder(31000)]
     public sealed class KoikatsuStudioCharacterPose : MonoBehaviour
     {
         private const float Epsilon = 0.000001f;
@@ -102,7 +103,7 @@ namespace StudioEditor.ReferenceModels
                 character,
                 source.Card?.Status,
                 catalog);
-            ApplySceneExpression(character, source);
+            ApplySceneExpression(character, source, transforms);
             ApplyHandPoses(character, source);
 
             var hasFk = source.Bones.Count != 0;
@@ -117,7 +118,8 @@ namespace StudioEditor.ReferenceModels
 
         private static void ApplySceneExpression(
             KoikatsuReferenceModelInstance character,
-            KoikatsuSceneCharacter source)
+            KoikatsuSceneCharacter source,
+            IReadOnlyDictionary<string, Transform> transforms)
         {
             var mouth = character.Controls?.Mouth;
             if (mouth != null)
@@ -125,33 +127,70 @@ namespace StudioEditor.ReferenceModels
                 mouth.SetFixedOpenRate(source.MouthOpen);
             }
 
-            var eyeLook = character.Controls?.Eyes?.Look as
-                CharacterEyeLookController;
+            var eyeLook = character.Controls?.Eyes?.Look;
+            var koikatsuEyeLook = eyeLook as CharacterEyeLookController;
             var data = source.EyeLookData;
-            if (eyeLook == null || data == null || data.Length < 32)
+            if (koikatsuEyeLook != null &&
+                data != null &&
+                data.Length >= 32)
             {
-                return;
-            }
-
-            try
-            {
-                using (var stream = new MemoryStream(data, false))
-                using (var reader = new BinaryReader(stream))
+                try
                 {
-                    var left = ReadQuaternion(reader);
-                    var right = ReadQuaternion(reader);
-                    eyeLook.SetFixedLocalRotations(left, right);
+                    using (var stream = new MemoryStream(data, false))
+                    using (var reader = new BinaryReader(stream))
+                    {
+                        var left = ReadQuaternion(reader);
+                        var right = ReadQuaternion(reader);
+                        koikatsuEyeLook.SetFixedLocalRotations(left, right);
+                    }
+                }
+                catch (Exception exception) when (
+                    exception is IOException ||
+                    exception is ArgumentException)
+                {
+                    Debug.LogWarning(
+                        "Could not restore the Koikatsu Studio eye pose: " +
+                        exception.Message,
+                        character.Root);
                 }
             }
-            catch (Exception exception) when (
-                exception is IOException ||
-                exception is ArgumentException)
+
+            var lookAtTarget = RestoreLookAtTarget(
+                character.Root,
+                source.LookAtTarget,
+                transforms);
+            if (eyeLook != null &&
+                source.Card?.Status?.EyesLookPattern == 4)
             {
-                Debug.LogWarning(
-                    "Could not restore the Koikatsu Studio eye pose: " +
-                    exception.Message,
-                    character.Root);
+                eyeLook.SetManualTarget(lookAtTarget);
             }
+        }
+
+        private static Transform RestoreLookAtTarget(
+            GameObject characterRoot,
+            KoikatsuSceneBone source,
+            IReadOnlyDictionary<string, Transform> transforms)
+        {
+            if (characterRoot == null || source == null ||
+                transforms == null ||
+                !transforms.TryGetValue("cf_j_head", out var head) ||
+                head == null)
+            {
+                return null;
+            }
+
+            var target = head.Find("Look At Target");
+            if (target == null)
+            {
+                var targetObject = new GameObject("Look At Target");
+                target = targetObject.transform;
+                target.SetParent(head, false);
+            }
+
+            target.localPosition = source.Position;
+            target.localRotation = Quaternion.Euler(source.Rotation);
+            target.localScale = source.Scale;
+            return target;
         }
 
         private static Quaternion ReadQuaternion(BinaryReader reader)
@@ -325,7 +364,6 @@ namespace StudioEditor.ReferenceModels
             initialized = false;
             if (poseCoordinator != null)
             {
-                poseCoordinator.EvaluationStarting -= SolveFinalIk;
                 poseCoordinator.UnregisterModifier(fkModifier);
                 poseCoordinator.UnregisterModifier(ikModifier);
             }
@@ -343,6 +381,22 @@ namespace StudioEditor.ReferenceModels
             {
                 UpdateKinematicState();
             }
+        }
+
+        private void Update()
+        {
+            if (initialized)
+            {
+                // Match SolverManager's order: clear the previous IK result in
+                // Update, then let Animator and Timeline establish this frame's
+                // pose before Final IK runs at the end of the pose pipeline.
+                finalIkRig?.FixTransforms();
+            }
+        }
+
+        private void LateUpdate()
+        {
+            SolveFinalIk();
         }
 
         private void OnDisable()
@@ -438,7 +492,6 @@ namespace StudioEditor.ReferenceModels
             }
 
             initialized = true;
-            poseCoordinator.EvaluationStarting += SolveFinalIk;
             UpdateKinematicState();
             if (fkOverrides.Length > 0)
             {
@@ -459,6 +512,7 @@ namespace StudioEditor.ReferenceModels
             }
 
             poseCoordinator.EvaluateNow();
+            SolveFinalIk();
         }
 
         private void SolveFinalIk()

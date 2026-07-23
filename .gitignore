@@ -7,3 +7,7 @@ UserSettings
 Assets/_Recovery
 Assets/BodyEditor/Tests
 Diagnostics
+/Assets/Plugins/RootMotion/
+/Assets/Plugins/RootMotion.meta
+/Assets/Plugins.meta
+/RootMotion*.csproj

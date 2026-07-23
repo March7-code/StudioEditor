@@ -62,20 +62,27 @@
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuMaterialConverter.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuVirtualAssetLoader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuBodyBoneProfile.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuFaceNormalProxyBuilder.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuTimelineSceneReader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioItemMetadata.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuOverlayTextureBaker.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuCardReader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuBodyMaskBaker.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuClothesRendererMap.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuAccessoryRendererMap.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuFaceTextureBaker.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuListCatalog.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuMorphControllerLoader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuPartLoader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioPatternLoader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuShapeApplicator.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioSceneLoader.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuFinalIkRuntime.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuReferenceModelAdapter.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioItemAppearance.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuClothesTextureBaker.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\AssemblyInfo.cs" />
+    <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioFinalIkRig.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuStudioItemLoader.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuAssetBundleCache.cs" />
     <Compile Include="Assets\BodyEditor\Adapters\Koikatsu\KoikatsuCard.cs" />
@@ -91,6 +98,8 @@
     <None Include="Assets\BodyEditor\Adapters\Koikatsu\Resources\Shaders\KoikatsuBodyMaskBake.shader" />
     <None Include="Assets\BodyEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.LICENSE.txt" />
     <None Include="Assets\BodyEditor\Adapters\Koikatsu\Plugins\MessagePack.dll" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\Resources\Shaders\KoikatsuOverlayBake.shader" />
+    <None Include="Assets\BodyEditor\Adapters\Koikatsu\link.xml" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">

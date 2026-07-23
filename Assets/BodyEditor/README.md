@@ -6,24 +6,6 @@ Architecture planning for the new format-independent character runtime and optio
 body self-collision system is documented in
 `Assets/BodyEditor/CharacterModelBodyConstraintsPlan.md`.
 
-## Current template
-
-- Prefab: `Assets/BodyEditor/Templates/DefaultHumanoidSkeleton.prefab`
-- Pose: T-pose
-- Scale: meters, approximately 1.8 m tall
-- Bone semantics: Unity `HumanBodyBones`
-- Included bones: 22 body bones covering torso, head, shoulders, arms, hands, legs, feet, and toes
-- Deliberately omitted for now: fingers, eyes, jaw, mesh, avatar, and animation controller
-
-The `HumanoidSkeleton` component stores the semantic bone mapping, validates required bones and hierarchy relationships, and draws the skeleton with scene gizmos.
-
-## Editor commands
-
-- `Tools > Body Editor > Rebuild Default Humanoid Skeleton`
-- `GameObject > Body Editor > Default Humanoid Skeleton`
-
-The first command rebuilds the template prefab. The second instantiates it in the current scene.
-
 ## Next implementation step
 
 The runtime UI Toolkit top bar imports reference models directly from disk.
@@ -37,13 +19,16 @@ The Koikatsu adapter accepts female character-card PNGs as its primary input. It
 parses the PNG container, block table, Custom, Coordinate, and Parameter blocks while
 retaining all other block payloads (including KKEx) for later resolvers.
 
-Koikatsu installation roots are configured in:
+The local Koikatsu installation root can be selected from
+`Settings > Editor Settings` while the editor is running. The project default
+roots remain configured in:
 
 `Assets/BodyEditor/Adapters/Koikatsu/Resources/KoikatsuAdapterConfig.json`
 
 Each entry points to a directory containing `abdata`, `mods`, and `UserData`. The
-adapter first checks this table and then falls back to finding the `UserData` ancestor
-of the imported card. Game AssetBundles remain read-only. Before Unity loads a legacy
+adapter checks the local editor setting first, then this table, and finally falls back
+to finding the `UserData` ancestor of the imported card. Game AssetBundles remain
+read-only. Before Unity loads a legacy
 bundle, the adapter creates a source-fingerprinted compatibility copy under
 `Library/BodyEditor/KoikatsuBundles`. Only invalid legacy zero-count mip fields are
 normalized; valid single- and multi-level textures remain untouched. Modified bundles
@@ -90,13 +75,36 @@ migration rules (`Migrate`, `MigrateAll`, and `StripAll`) are applied to charact
 UAR references when the replacement manifest is active, matching Sideloader's card
 resolution behavior.
 
+## Optional Final IK integration
+
+Final IK is not included in this repository. Without it, imported Studio character
+poses use Body Editor's built-in limb solver and Studio items skip Final IK metadata.
+Users who own Final IK can import it into the Unity project normally. Body Editor
+detects `RootMotion.FinalIK.FullBodyBipedIK` after the next assembly reload and
+automatically upgrades character and Studio-item solving; no scripting define or
+project setting is required. The current status can be checked from
+`Tools > Body Editor > Integrations > Check Final IK`.
+
 ## Koikatsu Studio scene timelines
 
 Studio scene-card import also reads the ExtendedSave `timeline/sceneInfo` payload.
-When Timeline data is present, a bottom panel exposes play, pause, stop, seeking,
-looping, playback speed, and per-track enable controls. The panel reports every
-source track, including tracks that could not be bound, instead of silently dropping
-them.
+The Timeline panel is always available from the left-side TL tool. Without an
+imported scene Timeline it provides a local editable 10-second timeline with
+position, rotation, and scale tracks, current-time key authoring, track/key deletion,
+and duration editing. The selected skeleton bone is used as the authoring target,
+then the imported model root, then the main camera.
+
+When imported Timeline data is present it takes priority in the panel and exposes
+play, pause, stop, seeking, looping, playback speed, and per-track enable controls.
+The panel reports every source track, including tracks that could not be bound,
+instead of silently dropping them. Local authored tracks are runtime data for now;
+scene-card serialization and export are not yet connected.
+
+The ruler and track lanes display the imported or authored timeline duration, current
+playhead, and each source keyframe at its actual time. Clicking or dragging a lane
+seeks the scene. REC captures the full Timeline as a deterministic PNG sequence
+at the selected FPS, with a capture manifest and an FFmpeg command written below
+Application.persistentDataPath/BodyEditor/Captures.
 
 The current playback stage supports Timeline guide-object position, quaternion
 rotation, and scale tracks plus KKPE bone position, rotation, and scale tracks. It

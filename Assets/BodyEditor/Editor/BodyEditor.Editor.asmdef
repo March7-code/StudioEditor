@@ -2,7 +2,9 @@
   "name": "BodyEditor.Editor",
   "rootNamespace": "BodyEditor.Editor",
   "references": [
-    "BodyEditor.Runtime"
+    "BodyEditor.Runtime",
+    "BodyEditor.Characters",
+    "BodyEditor.Adapter.Koikatsu"
   ],
   "includePlatforms": [
     "Editor"

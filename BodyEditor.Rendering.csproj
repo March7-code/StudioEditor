@@ -54,6 +54,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Assets\BodyEditor\Rendering\Core\CharacterRenderMaterialContext.cs" />
+    <Compile Include="Assets\BodyEditor\Rendering\Core\FaceSphereNormalProxy.cs" />
     <Compile Include="Assets\BodyEditor\Rendering\Core\MaterialRenderUtility.cs" />
     <Compile Include="Assets\BodyEditor\Rendering\Core\CharacterRenderSchemeRegistry.cs" />
   </ItemGroup>

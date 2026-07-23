@@ -1,0 +1,6 @@
+<linker>
+  <assembly fullname="RootMotion" preserve="all" ignoreIfMissing="1" />
+  <assembly fullname="Assembly-CSharp-firstpass" ignoreIfMissing="1">
+    <type fullname="RootMotion.*" preserve="all" />
+  </assembly>
+</linker>

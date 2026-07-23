@@ -7,6 +7,870 @@ using UnityEngine;
 
 namespace BodyEditor.ReferenceModels
 {
+    internal static class KoikatsuStudioFinalIkMetadataLoader
+    {
+        private static readonly object CacheLock = new object();
+        private static readonly Dictionary<string, Definition[]> Cache =
+            new Dictionary<string, Definition[]>(
+                StringComparer.OrdinalIgnoreCase);
+
+        public static int Attach(
+            KoikatsuBundleSource source,
+            string assetName,
+            GameObject instance)
+        {
+            if (source == null || string.IsNullOrWhiteSpace(assetName) ||
+                instance == null || !KoikatsuFinalIkRuntime.IsAvailable)
+            {
+                return 0;
+            }
+
+            var definitions = GetDefinitions(source, assetName);
+            if (definitions.Length == 0)
+            {
+                return 0;
+            }
+
+            var transforms =
+                KoikatsuSpringBoneMetadataLoader.BuildRuntimeTransformMap(
+                    instance.transform);
+            var attached = 0;
+            for (var index = 0; index < definitions.Length; index++)
+            {
+                if (TryAttach(definitions[index], transforms))
+                {
+                    attached++;
+                }
+            }
+
+            return attached;
+        }
+
+        private static Definition[] GetDefinitions(
+            KoikatsuBundleSource source,
+            string assetName)
+        {
+            var file = new FileInfo(source.FilePath);
+            var key = source.CacheKey + "|" + assetName + "|final-ik|" +
+                      file.Length + "|" + file.LastWriteTimeUtc.Ticks;
+            lock (CacheLock)
+            {
+                if (!Cache.TryGetValue(key, out var definitions))
+                {
+                    definitions = ParseSafely(source, assetName);
+                    Cache.Add(key, definitions);
+                }
+
+                return definitions;
+            }
+        }
+
+        private static Definition[] ParseSafely(
+            KoikatsuBundleSource source,
+            string assetName)
+        {
+            try
+            {
+                return Parse(source, assetName);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    "Could not read Koikatsu Final IK metadata for prefab " +
+                    $"'{assetName}' in '{source.DisplayName}': " +
+                    exception.Message);
+                return Array.Empty<Definition>();
+            }
+        }
+
+        private static Definition[] Parse(
+            KoikatsuBundleSource source,
+            string assetName)
+        {
+            var manager = new AssetsManager();
+            Stream ownedStream = null;
+            try
+            {
+                var bundle = KoikatsuClothesRendererMapLoader.LoadBundle(
+                    manager,
+                    source,
+                    out ownedStream);
+                var assets = manager.LoadAssetsFileFromBundle(bundle, 0, false);
+                var context = new KoikatsuClothesRendererMapLoader.ParseContext(
+                    manager,
+                    assets);
+                var rootPathId = KoikatsuClothesRendererMapLoader.FindRootGameObject(
+                    context,
+                    assetName);
+                if (rootPathId == 0)
+                {
+                    return Array.Empty<Definition>();
+                }
+
+                var result = new List<Definition>();
+                var behaviours = assets.file.GetAssetsOfType(
+                    AssetClassID.MonoBehaviour);
+                for (var index = 0; index < behaviours.Count; index++)
+                {
+                    var behaviour = manager.GetBaseField(
+                        assets,
+                        behaviours[index],
+                        AssetReadFlags.None);
+                    var references = behaviour["references"];
+                    var solver = behaviour["solver"];
+                    if (references.IsDummy || solver.IsDummy)
+                    {
+                        continue;
+                    }
+
+                    var host = GetOwnerPath(context, rootPathId, behaviour);
+                    var definition = ReadDefinition(
+                        context,
+                        rootPathId,
+                        host,
+                        behaviour,
+                        references,
+                        solver);
+                    if (definition != null)
+                    {
+                        result.Add(definition);
+                    }
+                }
+
+                return result.ToArray();
+            }
+            finally
+            {
+                manager.UnloadAll(true);
+                ownedStream?.Dispose();
+            }
+        }
+
+        private static Definition ReadDefinition(
+            KoikatsuClothesRendererMapLoader.ParseContext context,
+            long rootPathId,
+            string hostPath,
+            AssetTypeValueField behaviour,
+            AssetTypeValueField references,
+            AssetTypeValueField solver)
+        {
+            if (hostPath == null)
+            {
+                return null;
+            }
+
+            var root = GetTransformPath(
+                context,
+                rootPathId,
+                references["root"]);
+            var pelvis = GetTransformPath(
+                context,
+                rootPathId,
+                references["pelvis"]);
+            var leftThigh = GetTransformPath(
+                context,
+                rootPathId,
+                references["leftThigh"]);
+            var leftCalf = GetTransformPath(
+                context,
+                rootPathId,
+                references["leftCalf"]);
+            var leftFoot = GetTransformPath(
+                context,
+                rootPathId,
+                references["leftFoot"]);
+            var rightThigh = GetTransformPath(
+                context,
+                rootPathId,
+                references["rightThigh"]);
+            var rightCalf = GetTransformPath(
+                context,
+                rootPathId,
+                references["rightCalf"]);
+            var rightFoot = GetTransformPath(
+                context,
+                rootPathId,
+                references["rightFoot"]);
+            var leftUpperArm = GetTransformPath(
+                context,
+                rootPathId,
+                references["leftUpperArm"]);
+            var leftForearm = GetTransformPath(
+                context,
+                rootPathId,
+                references["leftForearm"]);
+            var leftHand = GetTransformPath(
+                context,
+                rootPathId,
+                references["leftHand"]);
+            var rightUpperArm = GetTransformPath(
+                context,
+                rootPathId,
+                references["rightUpperArm"]);
+            var rightForearm = GetTransformPath(
+                context,
+                rootPathId,
+                references["rightForearm"]);
+            var rightHand = GetTransformPath(
+                context,
+                rootPathId,
+                references["rightHand"]);
+            var spine = ReadTransformPaths(
+                context,
+                rootPathId,
+                references["spine"]);
+            var rootNode = GetTransformPath(
+                context,
+                rootPathId,
+                solver["rootNode"]);
+            if (root == null || pelvis == null || leftThigh == null ||
+                leftCalf == null || leftFoot == null || rightThigh == null ||
+                rightCalf == null || rightFoot == null ||
+                leftUpperArm == null || leftForearm == null ||
+                leftHand == null || rightUpperArm == null ||
+                rightForearm == null || rightHand == null ||
+                spine.Length == 0 || rootNode == null)
+            {
+                return null;
+            }
+
+            return new Definition(
+                hostPath,
+                ReadBool(behaviour["m_Enabled"], true),
+                ReadBool(behaviour["fixTransforms"], true),
+                root,
+                pelvis,
+                leftThigh,
+                leftCalf,
+                leftFoot,
+                rightThigh,
+                rightCalf,
+                rightFoot,
+                leftUpperArm,
+                leftForearm,
+                leftHand,
+                rightUpperArm,
+                rightForearm,
+                rightHand,
+                GetTransformPath(
+                    context,
+                    rootPathId,
+                    references["head"]),
+                spine,
+                ReadTransformPaths(
+                    context,
+                    rootPathId,
+                    references["eyes"]),
+                rootNode,
+                ReadFloat(solver["IKPositionWeight"], 1f),
+                ReadInt(solver["iterations"], 4),
+                ReadFloat(solver["spineStiffness"], 0.5f),
+                ReadFloat(solver["pullBodyVertical"], 0.5f),
+                ReadFloat(solver["pullBodyHorizontal"], 0f),
+                ReadEffectors(context, rootPathId, solver["effectors"]),
+                ReadChains(context, rootPathId, solver["chain"]),
+                ReadFloat(solver["spineMapping"]["twistWeight"], 1f),
+                ReadLimbMappings(solver["limbMappings"]));
+        }
+
+        private static bool TryAttach(
+            Definition definition,
+            IReadOnlyDictionary<string, Transform> transforms)
+        {
+            if (!TryResolve(transforms, definition.HostPath, out var host) ||
+                !TryResolve(transforms, definition.Root, out var root) ||
+                !TryResolve(transforms, definition.Pelvis, out var pelvis) ||
+                !TryResolve(
+                    transforms,
+                    definition.LeftThigh,
+                    out var leftThigh) ||
+                !TryResolve(transforms, definition.LeftCalf, out var leftCalf) ||
+                !TryResolve(transforms, definition.LeftFoot, out var leftFoot) ||
+                !TryResolve(
+                    transforms,
+                    definition.RightThigh,
+                    out var rightThigh) ||
+                !TryResolve(
+                    transforms,
+                    definition.RightCalf,
+                    out var rightCalf) ||
+                !TryResolve(
+                    transforms,
+                    definition.RightFoot,
+                    out var rightFoot) ||
+                !TryResolve(
+                    transforms,
+                    definition.LeftUpperArm,
+                    out var leftUpperArm) ||
+                !TryResolve(
+                    transforms,
+                    definition.LeftForearm,
+                    out var leftForearm) ||
+                !TryResolve(transforms, definition.LeftHand, out var leftHand) ||
+                !TryResolve(
+                    transforms,
+                    definition.RightUpperArm,
+                    out var rightUpperArm) ||
+                !TryResolve(
+                    transforms,
+                    definition.RightForearm,
+                    out var rightForearm) ||
+                !TryResolve(
+                    transforms,
+                    definition.RightHand,
+                    out var rightHand) ||
+                !TryResolve(
+                    transforms,
+                    definition.RootNode,
+                    out var rootNode) ||
+                !TryResolveArray(
+                    transforms,
+                    definition.Spine,
+                    out var spine))
+            {
+                return false;
+            }
+
+            TryResolve(transforms, definition.Head, out var head);
+            TryResolveArray(transforms, definition.Eyes, out var eyes);
+            var references = KoikatsuFinalIkRuntime.CreateReferences();
+            SetMember(references, "root", root);
+            SetMember(references, "pelvis", pelvis);
+            SetMember(references, "leftThigh", leftThigh);
+            SetMember(references, "leftCalf", leftCalf);
+            SetMember(references, "leftFoot", leftFoot);
+            SetMember(references, "rightThigh", rightThigh);
+            SetMember(references, "rightCalf", rightCalf);
+            SetMember(references, "rightFoot", rightFoot);
+            SetMember(references, "leftUpperArm", leftUpperArm);
+            SetMember(references, "leftForearm", leftForearm);
+            SetMember(references, "leftHand", leftHand);
+            SetMember(references, "rightUpperArm", rightUpperArm);
+            SetMember(references, "rightForearm", rightForearm);
+            SetMember(references, "rightHand", rightHand);
+            SetMember(references, "head", head);
+            SetMember(references, "spine", spine);
+            SetMember(references, "eyes", eyes ?? Array.Empty<Transform>());
+
+            if (!KoikatsuFinalIkRuntime.TryAdd(
+                    host.gameObject,
+                    out var component,
+                    out _))
+            {
+                return false;
+            }
+
+            component.FixTransforms = definition.FixTransforms;
+            component.SetReferences(references, rootNode);
+            ApplySolver(definition, transforms, component.Solver);
+            component.Enabled = definition.Enabled;
+            return true;
+        }
+
+        private static void ApplySolver(
+            Definition definition,
+            IReadOnlyDictionary<string, Transform> transforms,
+            object solver)
+        {
+            SetMember(solver, "IKPositionWeight", definition.IkPositionWeight);
+            SetMember(solver, "iterations", definition.Iterations);
+            SetMember(solver, "spineStiffness", definition.SpineStiffness);
+            SetMember(
+                solver,
+                "pullBodyVertical",
+                definition.PullBodyVertical);
+            SetMember(
+                solver,
+                "pullBodyHorizontal",
+                definition.PullBodyHorizontal);
+            SetMember(
+                KoikatsuFinalIkRuntime.GetMember(solver, "spineMapping"),
+                "twistWeight",
+                definition.SpineTwistWeight);
+
+            var effectors = KoikatsuFinalIkRuntime.GetArray(
+                solver,
+                "effectors");
+
+            for (var index = 0;
+                 index < definition.Effectors.Length &&
+                 index < effectors.Length;
+                 index++)
+            {
+                var source = definition.Effectors[index];
+                TryResolve(transforms, source.Target, out var target);
+                var effector = effectors.GetValue(index);
+                SetMember(effector, "target", target);
+                SetMember(effector, "positionWeight", source.PositionWeight);
+                SetMember(effector, "rotationWeight", source.RotationWeight);
+                SetMember(
+                    effector,
+                    "maintainRelativePositionWeight",
+                    source.MaintainRelativePositionWeight);
+                SetMember(
+                    effector,
+                    "effectChildNodes",
+                    source.EffectChildNodes);
+            }
+
+            var chains = KoikatsuFinalIkRuntime.GetArray(solver, "chain");
+
+            for (var index = 0;
+                 index < definition.Chains.Length && index < chains.Length;
+                 index++)
+            {
+                var source = definition.Chains[index];
+                var chain = chains.GetValue(index);
+                SetMember(chain, "pin", source.Pin);
+                SetMember(chain, "pull", source.Pull);
+                SetMember(chain, "push", source.Push);
+                SetMember(chain, "pushParent", source.PushParent);
+                SetMember(chain, "reach", source.Reach);
+                SetMember(
+                    chain,
+                    "reachSmoothing",
+                    source.ReachSmoothing);
+                SetMember(
+                    chain,
+                    "pushSmoothing",
+                    source.PushSmoothing);
+                var bendConstraint = KoikatsuFinalIkRuntime.GetMember(
+                    chain,
+                    "bendConstraint");
+                if (bendConstraint != null && source.Bend != null)
+                {
+                    TryResolve(
+                        transforms,
+                        source.Bend.Target,
+                        out var bendTarget);
+                    SetMember(bendConstraint, "bendGoal", bendTarget);
+                    SetMember(bendConstraint, "weight", source.Bend.Weight);
+                }
+            }
+
+            var limbMappings = KoikatsuFinalIkRuntime.GetArray(
+                solver,
+                "limbMappings");
+
+            for (var index = 0;
+                 index < definition.LimbMappings.Length &&
+                 index < limbMappings.Length;
+                 index++)
+            {
+                var mapping = limbMappings.GetValue(index);
+                SetMember(
+                    mapping,
+                    "weight",
+                    definition.LimbMappings[index].Weight);
+                SetMember(
+                    mapping,
+                    "maintainRotationWeight",
+                    definition.LimbMappings[index].MaintainRotationWeight);
+            }
+        }
+
+        private static void SetMember(
+            object target,
+            string name,
+            object value)
+        {
+            KoikatsuFinalIkRuntime.SetMember(target, name, value);
+        }
+
+        private static EffectorDefinition[] ReadEffectors(
+            KoikatsuClothesRendererMapLoader.ParseContext context,
+            long rootPathId,
+            AssetTypeValueField field)
+        {
+            var array = KoikatsuClothesRendererMapLoader.GetArray(field);
+            if (array == null)
+            {
+                return Array.Empty<EffectorDefinition>();
+            }
+
+            var result = new EffectorDefinition[array.Children.Count];
+            for (var index = 0; index < result.Length; index++)
+            {
+                var effector = array.Children[index];
+                result[index] = new EffectorDefinition(
+                    GetTransformPath(
+                        context,
+                        rootPathId,
+                        effector["target"]),
+                    ReadFloat(effector["positionWeight"], 0f),
+                    ReadFloat(effector["rotationWeight"], 0f),
+                    ReadFloat(
+                        effector["maintainRelativePositionWeight"],
+                        0f),
+                    ReadBool(effector["effectChildNodes"], true));
+            }
+
+            return result;
+        }
+
+        private static ChainDefinition[] ReadChains(
+            KoikatsuClothesRendererMapLoader.ParseContext context,
+            long rootPathId,
+            AssetTypeValueField field)
+        {
+            var array = KoikatsuClothesRendererMapLoader.GetArray(field);
+            if (array == null)
+            {
+                return Array.Empty<ChainDefinition>();
+            }
+
+            var result = new ChainDefinition[array.Children.Count];
+            for (var index = 0; index < result.Length; index++)
+            {
+                var chain = array.Children[index];
+                var bend = chain["bendConstraint"];
+                result[index] = new ChainDefinition(
+                    ReadFloat(chain["pin"], 0f),
+                    ReadFloat(chain["pull"], 1f),
+                    ReadFloat(chain["push"], 0f),
+                    ReadFloat(chain["pushParent"], 0f),
+                    ReadFloat(chain["reach"], 0.1f),
+                    ReadInt(chain["reachSmoothing"], 1),
+                    ReadInt(chain["pushSmoothing"], 1),
+                    bend.IsDummy
+                        ? null
+                        : new BendDefinition(
+                            GetTransformPath(
+                                context,
+                                rootPathId,
+                                bend["bendGoal"]),
+                            ReadFloat(bend["weight"], 0f)));
+            }
+
+            return result;
+        }
+
+        private static LimbMappingDefinition[] ReadLimbMappings(
+            AssetTypeValueField field)
+        {
+            var array = KoikatsuClothesRendererMapLoader.GetArray(field);
+            if (array == null)
+            {
+                return Array.Empty<LimbMappingDefinition>();
+            }
+
+            var result = new LimbMappingDefinition[array.Children.Count];
+            for (var index = 0; index < result.Length; index++)
+            {
+                var mapping = array.Children[index];
+                result[index] = new LimbMappingDefinition(
+                    ReadFloat(mapping["weight"], 1f),
+                    ReadFloat(mapping["maintainRotationWeight"], 0f));
+            }
+
+            return result;
+        }
+
+        private static string GetOwnerPath(
+            KoikatsuClothesRendererMapLoader.ParseContext context,
+            long rootPathId,
+            AssetTypeValueField behaviour)
+        {
+            var owner = context.Resolve(behaviour["m_GameObject"]);
+            if (owner.info == null)
+            {
+                return null;
+            }
+
+            var transform = KoikatsuClothesRendererMapLoader.FindTransform(
+                context,
+                owner.baseField);
+            return transform.info == null
+                ? null
+                : KoikatsuClothesRendererMapLoader.CreateSerializedPath(
+                    context,
+                    rootPathId,
+                    transform);
+        }
+
+        private static string[] ReadTransformPaths(
+            KoikatsuClothesRendererMapLoader.ParseContext context,
+            long rootPathId,
+            AssetTypeValueField field)
+        {
+            var array = KoikatsuClothesRendererMapLoader.GetArray(field);
+            if (array == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            var result = new List<string>();
+            for (var index = 0; index < array.Children.Count; index++)
+            {
+                var path = GetTransformPath(
+                    context,
+                    rootPathId,
+                    array.Children[index]);
+                if (path != null)
+                {
+                    result.Add(path);
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        private static string GetTransformPath(
+            KoikatsuClothesRendererMapLoader.ParseContext context,
+            long rootPathId,
+            AssetTypeValueField pointer)
+        {
+            if (pointer == null || pointer.IsDummy)
+            {
+                return null;
+            }
+
+            var transform = context.Resolve(pointer);
+            return transform.info == null ||
+                   transform.info.TypeId != (int)AssetClassID.Transform
+                ? null
+                : KoikatsuClothesRendererMapLoader.CreateSerializedPath(
+                    context,
+                    rootPathId,
+                    transform);
+        }
+
+        private static bool TryResolve(
+            IReadOnlyDictionary<string, Transform> transforms,
+            string path,
+            out Transform transform)
+        {
+            if (path != null && transforms.TryGetValue(path, out transform))
+            {
+                return true;
+            }
+
+            transform = null;
+            return false;
+        }
+
+        private static bool TryResolveArray(
+            IReadOnlyDictionary<string, Transform> transforms,
+            IReadOnlyList<string> paths,
+            out Transform[] result)
+        {
+            if (paths == null)
+            {
+                result = Array.Empty<Transform>();
+                return true;
+            }
+
+            result = new Transform[paths.Count];
+            for (var index = 0; index < paths.Count; index++)
+            {
+                if (!TryResolve(transforms, paths[index], out result[index]))
+                {
+                    result = null;
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool ReadBool(AssetTypeValueField field, bool fallback)
+        {
+            return field == null || field.IsDummy ? fallback : field.AsBool;
+        }
+
+        private static int ReadInt(AssetTypeValueField field, int fallback)
+        {
+            return field == null || field.IsDummy ? fallback : field.AsInt;
+        }
+
+        private static float ReadFloat(
+            AssetTypeValueField field,
+            float fallback)
+        {
+            return field == null || field.IsDummy ? fallback : field.AsFloat;
+        }
+
+        private sealed class Definition
+        {
+            public Definition(
+                string hostPath,
+                bool enabled,
+                bool fixTransforms,
+                string root,
+                string pelvis,
+                string leftThigh,
+                string leftCalf,
+                string leftFoot,
+                string rightThigh,
+                string rightCalf,
+                string rightFoot,
+                string leftUpperArm,
+                string leftForearm,
+                string leftHand,
+                string rightUpperArm,
+                string rightForearm,
+                string rightHand,
+                string head,
+                string[] spine,
+                string[] eyes,
+                string rootNode,
+                float ikPositionWeight,
+                int iterations,
+                float spineStiffness,
+                float pullBodyVertical,
+                float pullBodyHorizontal,
+                EffectorDefinition[] effectors,
+                ChainDefinition[] chains,
+                float spineTwistWeight,
+                LimbMappingDefinition[] limbMappings)
+            {
+                HostPath = hostPath;
+                Enabled = enabled;
+                FixTransforms = fixTransforms;
+                Root = root;
+                Pelvis = pelvis;
+                LeftThigh = leftThigh;
+                LeftCalf = leftCalf;
+                LeftFoot = leftFoot;
+                RightThigh = rightThigh;
+                RightCalf = rightCalf;
+                RightFoot = rightFoot;
+                LeftUpperArm = leftUpperArm;
+                LeftForearm = leftForearm;
+                LeftHand = leftHand;
+                RightUpperArm = rightUpperArm;
+                RightForearm = rightForearm;
+                RightHand = rightHand;
+                Head = head;
+                Spine = spine;
+                Eyes = eyes;
+                RootNode = rootNode;
+                IkPositionWeight = ikPositionWeight;
+                Iterations = iterations;
+                SpineStiffness = spineStiffness;
+                PullBodyVertical = pullBodyVertical;
+                PullBodyHorizontal = pullBodyHorizontal;
+                Effectors = effectors;
+                Chains = chains;
+                SpineTwistWeight = spineTwistWeight;
+                LimbMappings = limbMappings;
+            }
+
+            public string HostPath { get; }
+            public bool Enabled { get; }
+            public bool FixTransforms { get; }
+            public string Root { get; }
+            public string Pelvis { get; }
+            public string LeftThigh { get; }
+            public string LeftCalf { get; }
+            public string LeftFoot { get; }
+            public string RightThigh { get; }
+            public string RightCalf { get; }
+            public string RightFoot { get; }
+            public string LeftUpperArm { get; }
+            public string LeftForearm { get; }
+            public string LeftHand { get; }
+            public string RightUpperArm { get; }
+            public string RightForearm { get; }
+            public string RightHand { get; }
+            public string Head { get; }
+            public string[] Spine { get; }
+            public string[] Eyes { get; }
+            public string RootNode { get; }
+            public float IkPositionWeight { get; }
+            public int Iterations { get; }
+            public float SpineStiffness { get; }
+            public float PullBodyVertical { get; }
+            public float PullBodyHorizontal { get; }
+            public EffectorDefinition[] Effectors { get; }
+            public ChainDefinition[] Chains { get; }
+            public float SpineTwistWeight { get; }
+            public LimbMappingDefinition[] LimbMappings { get; }
+        }
+
+        private sealed class EffectorDefinition
+        {
+            public EffectorDefinition(
+                string target,
+                float positionWeight,
+                float rotationWeight,
+                float maintainRelativePositionWeight,
+                bool effectChildNodes)
+            {
+                Target = target;
+                PositionWeight = positionWeight;
+                RotationWeight = rotationWeight;
+                MaintainRelativePositionWeight =
+                    maintainRelativePositionWeight;
+                EffectChildNodes = effectChildNodes;
+            }
+
+            public string Target { get; }
+            public float PositionWeight { get; }
+            public float RotationWeight { get; }
+            public float MaintainRelativePositionWeight { get; }
+            public bool EffectChildNodes { get; }
+        }
+
+        private sealed class ChainDefinition
+        {
+            public ChainDefinition(
+                float pin,
+                float pull,
+                float push,
+                float pushParent,
+                float reach,
+                int reachSmoothing,
+                int pushSmoothing,
+                BendDefinition bend)
+            {
+                Pin = pin;
+                Pull = pull;
+                Push = push;
+                PushParent = pushParent;
+                Reach = reach;
+                ReachSmoothing = reachSmoothing;
+                PushSmoothing = pushSmoothing;
+                Bend = bend;
+            }
+
+            public float Pin { get; }
+            public float Pull { get; }
+            public float Push { get; }
+            public float PushParent { get; }
+            public float Reach { get; }
+            public int ReachSmoothing { get; }
+            public int PushSmoothing { get; }
+            public BendDefinition Bend { get; }
+        }
+
+        private sealed class BendDefinition
+        {
+            public BendDefinition(string target, float weight)
+            {
+                Target = target;
+                Weight = weight;
+            }
+
+            public string Target { get; }
+            public float Weight { get; }
+        }
+
+        private sealed class LimbMappingDefinition
+        {
+            public LimbMappingDefinition(
+                float weight,
+                float maintainRotationWeight)
+            {
+                Weight = weight;
+                MaintainRotationWeight = maintainRotationWeight;
+            }
+
+            public float Weight { get; }
+            public float MaintainRotationWeight { get; }
+        }
+    }
+
     internal enum KoikatsuStudioRendererRole
     {
         Normal,
@@ -256,6 +1120,372 @@ namespace BodyEditor.ReferenceModels
         }
     }
 
+    internal sealed class KoikatsuDynamicBoneColliderDefinition
+    {
+        public KoikatsuDynamicBoneColliderDefinition(
+            string transformPath,
+            Vector3 center,
+            float radius,
+            float height,
+            int direction,
+            int bound)
+        {
+            TransformPath = transformPath;
+            Center = center;
+            Radius = Mathf.Max(0f, radius);
+            Height = Mathf.Max(0f, height);
+            Direction = Mathf.Clamp(direction, 0, 2);
+            Bound = Mathf.Clamp(bound, 0, 1);
+        }
+
+        public string TransformPath { get; }
+        public Vector3 Center { get; }
+        public float Radius { get; }
+        public float Height { get; }
+        public int Direction { get; }
+        public int Bound { get; }
+    }
+
+    internal sealed class KoikatsuDynamicBoneCollider
+    {
+        private readonly Transform transform;
+        private readonly Vector3 center;
+        private readonly float radius;
+        private readonly float height;
+        private readonly int direction;
+        private readonly int bound;
+
+        public KoikatsuDynamicBoneCollider(
+            Transform transform,
+            KoikatsuDynamicBoneColliderDefinition definition)
+        {
+            this.transform = transform;
+            center = definition.Center;
+            radius = definition.Radius;
+            height = definition.Height;
+            direction = definition.Direction;
+            bound = definition.Bound;
+        }
+
+        public void Collide(ref Vector3 particlePosition, float particleRadius)
+        {
+            if (transform == null || !transform.gameObject.activeInHierarchy)
+            {
+                return;
+            }
+
+            var scaledRadius = radius * Mathf.Abs(transform.lossyScale.z);
+            var halfSegment = (height - radius) * 0.5f;
+            if (halfSegment <= 0f)
+            {
+                if (bound == 0)
+                {
+                    OutsideSphere(
+                        ref particlePosition,
+                        particleRadius,
+                        transform.TransformPoint(center),
+                        scaledRadius);
+                }
+                else
+                {
+                    InsideSphere(
+                        ref particlePosition,
+                        particleRadius,
+                        transform.TransformPoint(center),
+                        scaledRadius);
+                }
+
+                return;
+            }
+
+            var first = center;
+            var second = center;
+            var offset = Axis(direction) * halfSegment;
+            first -= offset;
+            second += offset;
+            var p0 = transform.TransformPoint(first);
+            var p1 = transform.TransformPoint(second);
+            if (bound == 0)
+            {
+                OutsideCapsule(
+                    ref particlePosition,
+                    particleRadius,
+                    p0,
+                    p1,
+                    scaledRadius);
+            }
+            else
+            {
+                InsideCapsule(
+                    ref particlePosition,
+                    particleRadius,
+                    p0,
+                    p1,
+                    scaledRadius);
+            }
+        }
+
+        private static Vector3 Axis(int direction)
+        {
+            switch (direction)
+            {
+                case 1:
+                    return Vector3.up;
+                case 2:
+                    return Vector3.forward;
+                default:
+                    return Vector3.right;
+            }
+        }
+
+        private static void OutsideSphere(
+            ref Vector3 position,
+            float particleRadius,
+            Vector3 sphereCenter,
+            float sphereRadius)
+        {
+            var radius = sphereRadius + particleRadius;
+            var offset = position - sphereCenter;
+            var length = offset.magnitude;
+            if (length > 0f && length < radius)
+            {
+                position = sphereCenter + offset * (radius / length);
+            }
+        }
+
+        private static void InsideSphere(
+            ref Vector3 position,
+            float particleRadius,
+            Vector3 sphereCenter,
+            float sphereRadius)
+        {
+            var radius = sphereRadius + particleRadius;
+            var offset = position - sphereCenter;
+            var length = offset.magnitude;
+            if (length > radius)
+            {
+                position = sphereCenter + offset * (radius / length);
+            }
+        }
+
+        private static void OutsideCapsule(
+            ref Vector3 position,
+            float particleRadius,
+            Vector3 p0,
+            Vector3 p1,
+            float capsuleRadius)
+        {
+            CollideCapsule(
+                ref position,
+                particleRadius,
+                p0,
+                p1,
+                capsuleRadius,
+                false);
+        }
+
+        private static void InsideCapsule(
+            ref Vector3 position,
+            float particleRadius,
+            Vector3 p0,
+            Vector3 p1,
+            float capsuleRadius)
+        {
+            CollideCapsule(
+                ref position,
+                particleRadius,
+                p0,
+                p1,
+                capsuleRadius,
+                true);
+        }
+
+        private static void CollideCapsule(
+            ref Vector3 position,
+            float particleRadius,
+            Vector3 p0,
+            Vector3 p1,
+            float capsuleRadius,
+            bool inside)
+        {
+            var radius = capsuleRadius + particleRadius;
+            var axis = p1 - p0;
+            var offset = position - p0;
+            var dot = Vector3.Dot(offset, axis);
+            var axisLengthSquared = axis.sqrMagnitude;
+            Vector3 closest;
+            if (dot <= 0f || axisLengthSquared <= 0f)
+            {
+                closest = p0;
+            }
+            else if (dot >= axisLengthSquared)
+            {
+                closest = p1;
+            }
+            else
+            {
+                closest = p0 + axis * (dot / axisLengthSquared);
+            }
+
+            var fromSurface = position - closest;
+            var length = fromSurface.magnitude;
+            if (length <= 0f)
+            {
+                return;
+            }
+
+            if ((!inside && length < radius) || (inside && length > radius))
+            {
+                position = closest + fromSurface * (radius / length);
+            }
+        }
+    }
+
+    internal static class KoikatsuDynamicBoneMetadata
+    {
+        public static Dictionary<long, KoikatsuDynamicBoneColliderDefinition>
+            ReadColliders(
+                AssetsManager manager,
+                AssetsFileInstance assets,
+                KoikatsuClothesRendererMapLoader.ParseContext context,
+                long rootPathId)
+        {
+            var result = new Dictionary<long, KoikatsuDynamicBoneColliderDefinition>();
+            var behaviours = assets.file.GetAssetsOfType(
+                AssetClassID.MonoBehaviour);
+            for (var index = 0; index < behaviours.Count; index++)
+            {
+                var behaviour = manager.GetBaseField(
+                    assets,
+                    behaviours[index],
+                    AssetReadFlags.None);
+                var owner = context.Resolve(behaviour["m_GameObject"]);
+                if (owner.info == null)
+                {
+                    continue;
+                }
+
+                var transform = KoikatsuClothesRendererMapLoader.FindTransform(
+                    context,
+                    owner.baseField);
+                if (transform.info == null)
+                {
+                    continue;
+                }
+
+                var path = KoikatsuClothesRendererMapLoader.CreateSerializedPath(
+                    context,
+                    rootPathId,
+                    transform);
+                if (path == null || behaviour["m_Center"].IsDummy ||
+                    behaviour["m_Radius"].IsDummy ||
+                    behaviour["m_Height"].IsDummy ||
+                    behaviour["m_Direction"].IsDummy ||
+                    behaviour["m_Bound"].IsDummy)
+                {
+                    continue;
+                }
+
+                result[behaviours[index].PathId] =
+                    new KoikatsuDynamicBoneColliderDefinition(
+                        path,
+                        ReadVector3(behaviour["m_Center"]),
+                        ReadFloat(behaviour["m_Radius"], 0.5f),
+                        ReadFloat(behaviour["m_Height"], 0f),
+                        ReadInt(behaviour["m_Direction"], 0),
+                        ReadInt(behaviour["m_Bound"], 0));
+            }
+
+            return result;
+        }
+
+        public static KoikatsuDynamicBoneCollider[] Resolve(
+            IReadOnlyList<KoikatsuDynamicBoneColliderDefinition> definitions,
+            IReadOnlyDictionary<string, Transform> transforms)
+        {
+            if (definitions == null || definitions.Count == 0)
+            {
+                return Array.Empty<KoikatsuDynamicBoneCollider>();
+            }
+
+            var result = new List<KoikatsuDynamicBoneCollider>();
+            for (var index = 0; index < definitions.Count; index++)
+            {
+                var definition = definitions[index];
+                if (definition != null && transforms.TryGetValue(
+                        definition.TransformPath,
+                        out var transform))
+                {
+                    result.Add(new KoikatsuDynamicBoneCollider(
+                        transform,
+                        definition));
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        public static IReadOnlyList<KoikatsuDynamicBoneColliderDefinition>
+            ReadReferences(
+                AssetTypeValueField field,
+                IReadOnlyDictionary<long, KoikatsuDynamicBoneColliderDefinition>
+                    colliders)
+        {
+            var array = KoikatsuClothesRendererMapLoader.GetArray(field);
+            if (array == null || colliders == null)
+            {
+                return Array.Empty<KoikatsuDynamicBoneColliderDefinition>();
+            }
+
+            var result = new List<KoikatsuDynamicBoneColliderDefinition>();
+            for (var index = 0; index < array.Children.Count; index++)
+            {
+                var pointer = array.Children[index];
+                var pathId = GetPathId(pointer);
+                if (colliders.TryGetValue(pathId, out var definition))
+                {
+                    result.Add(definition);
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        private static long GetPathId(AssetTypeValueField pointer)
+        {
+            if (pointer == null || pointer.IsDummy ||
+                pointer["m_PathID"].IsDummy)
+            {
+                return 0;
+            }
+
+            return pointer["m_PathID"].AsLong;
+        }
+
+        private static float ReadFloat(AssetTypeValueField field, float fallback)
+        {
+            return field == null || field.IsDummy ? fallback : field.AsFloat;
+        }
+
+        private static int ReadInt(AssetTypeValueField field, int fallback)
+        {
+            return field == null || field.IsDummy ? fallback : field.AsInt;
+        }
+
+        private static Vector3 ReadVector3(AssetTypeValueField field)
+        {
+            if (field == null || field.IsDummy)
+            {
+                return Vector3.zero;
+            }
+
+            return new Vector3(
+                ReadFloat(field["x"], 0f),
+                ReadFloat(field["y"], 0f),
+                ReadFloat(field["z"], 0f));
+        }
+    }
+
     internal static class KoikatsuSpringBoneMetadataLoader
     {
         private static readonly object CacheLock = new object();
@@ -304,6 +1534,10 @@ namespace BodyEditor.ReferenceModels
                     }
                 }
 
+                var colliders = KoikatsuDynamicBoneMetadata.Resolve(
+                    definition.Colliders,
+                    transforms);
+
                 var spring = instance.AddComponent<KoikatsuSpringBone>();
                 spring.enabled = false;
                 spring.Configure(
@@ -313,12 +1547,14 @@ namespace BodyEditor.ReferenceModels
                     definition.Elasticity,
                     definition.Stiffness,
                     definition.Inert,
+                    definition.Radius,
                     definition.EndLength,
                     definition.EndOffset,
                     definition.Gravity,
                     definition.Force,
                     definition.FreezeAxis,
                     exclusions,
+                    colliders,
                     allowed && definition.Enabled);
                 attached++;
             }
@@ -388,6 +1624,12 @@ namespace BodyEditor.ReferenceModels
                 }
 
                 var result = new List<SpringDefinition>();
+                var colliderDefinitions =
+                    KoikatsuDynamicBoneMetadata.ReadColliders(
+                        manager,
+                        assets,
+                        context,
+                        rootPathId);
                 var behaviours = assets.file.GetAssetsOfType(
                     AssetClassID.MonoBehaviour);
                 for (var index = 0; index < behaviours.Count; index++)
@@ -422,6 +1664,7 @@ namespace BodyEditor.ReferenceModels
                         ReadFloat(behaviour["m_Elasticity"], 0.2f),
                         ReadFloat(behaviour["m_Stiffness"], 0.1f),
                         ReadFloat(behaviour["m_Inert"], 0f),
+                        ReadFloat(behaviour["m_Radius"], 0f),
                         ReadFloat(behaviour["m_EndLength"], 0f),
                         ReadVector3(behaviour["m_EndOffset"]),
                         ReadVector3(behaviour["m_Gravity"]),
@@ -431,6 +1674,9 @@ namespace BodyEditor.ReferenceModels
                             context,
                             rootPathId,
                             behaviour["m_Exclusions"]),
+                        KoikatsuDynamicBoneMetadata.ReadReferences(
+                            behaviour["m_Colliders"],
+                            colliderDefinitions),
                         ReadBool(behaviour["m_Enabled"], true)));
                 }
 
@@ -544,12 +1790,14 @@ namespace BodyEditor.ReferenceModels
                 float elasticity,
                 float stiffness,
                 float inert,
+                float radius,
                 float endLength,
                 Vector3 endOffset,
                 Vector3 gravity,
                 Vector3 force,
                 int freezeAxis,
                 string[] exclusionPaths,
+                IReadOnlyList<KoikatsuDynamicBoneColliderDefinition> colliders,
                 bool enabled)
             {
                 RootPath = rootPath;
@@ -558,12 +1806,15 @@ namespace BodyEditor.ReferenceModels
                 Elasticity = elasticity;
                 Stiffness = stiffness;
                 Inert = inert;
+                Radius = Mathf.Max(0f, radius);
                 EndLength = endLength;
                 EndOffset = endOffset;
                 Gravity = gravity;
                 Force = force;
                 FreezeAxis = freezeAxis;
                 ExclusionPaths = exclusionPaths ?? Array.Empty<string>();
+                Colliders = colliders ??
+                    Array.Empty<KoikatsuDynamicBoneColliderDefinition>();
                 Enabled = enabled;
             }
 
@@ -573,12 +1824,14 @@ namespace BodyEditor.ReferenceModels
             public float Elasticity { get; }
             public float Stiffness { get; }
             public float Inert { get; }
+            public float Radius { get; }
             public float EndLength { get; }
             public Vector3 EndOffset { get; }
             public Vector3 Gravity { get; }
             public Vector3 Force { get; }
             public int FreezeAxis { get; }
             public string[] ExclusionPaths { get; }
+            public IReadOnlyList<KoikatsuDynamicBoneColliderDefinition> Colliders { get; }
             public bool Enabled { get; }
         }
     }
@@ -593,7 +1846,8 @@ namespace BodyEditor.ReferenceModels
         public static int Attach(
             KoikatsuBundleSource source,
             string assetName,
-            GameObject instance)
+            GameObject instance,
+            bool allowed = true)
         {
             if (source == null || string.IsNullOrWhiteSpace(assetName) ||
                 instance == null)
@@ -643,7 +1897,11 @@ namespace BodyEditor.ReferenceModels
                             referencePath,
                             out references[boneIndex]))
                     {
-                        references[boneIndex] = bones[boneIndex];
+                        // A self-reference feeds the previous physics result
+                        // back in as the next frame's rest pose. Missing
+                        // references must fall back to the captured authored
+                        // transform instead.
+                        references[boneIndex] = null;
                     }
                 }
 
@@ -651,6 +1909,10 @@ namespace BodyEditor.ReferenceModels
                 {
                     continue;
                 }
+
+                var colliders = KoikatsuDynamicBoneMetadata.Resolve(
+                    definition.Colliders,
+                    transforms);
 
                 var spring = instance.AddComponent<KoikatsuVer02SpringBone>();
                 spring.enabled = false;
@@ -665,7 +1927,8 @@ namespace BodyEditor.ReferenceModels
                     definition.MaximumSteps,
                     definition.Gravity,
                     definition.Force,
-                    definition.Enabled);
+                    colliders,
+                    allowed && definition.Enabled);
                 attached++;
             }
 
@@ -734,6 +1997,12 @@ namespace BodyEditor.ReferenceModels
                 }
 
                 var result = new List<Ver02Definition>();
+                var colliderDefinitions =
+                    KoikatsuDynamicBoneMetadata.ReadColliders(
+                        manager,
+                        assets,
+                        context,
+                        rootPathId);
                 var behaviours = assets.file.GetAssetsOfType(
                     AssetClassID.MonoBehaviour);
                 for (var index = 0; index < behaviours.Count; index++)
@@ -801,6 +2070,7 @@ namespace BodyEditor.ReferenceModels
                         ReadFloat(pattern["EndOffsetInert"], 0f),
                         false,
                         1f,
+                        0f,
                         false,
                         Vector3.zero,
                         Vector3.zero,
@@ -825,6 +2095,9 @@ namespace BodyEditor.ReferenceModels
                             3)),
                         ReadVector3(pattern["Gravity"]),
                         ReadVector3(behaviour["Force"]),
+                        KoikatsuDynamicBoneMetadata.ReadReferences(
+                            behaviour["Colliders"],
+                            colliderDefinitions),
                         ReadBool(behaviour["m_Enabled"], true)));
                 }
 
@@ -850,6 +2123,7 @@ namespace BodyEditor.ReferenceModels
                 ReadFloat(field["Inert"], 0f),
                 ReadBool(field["IsRotationCalc"], false),
                 Mathf.Max(0f, ReadFloat(field["NextBoneLength"], 1f)),
+                ReadFloat(field["CollisionRadius"], 0f),
                 ReadBool(field["IsMoveLimit"], false),
                 ReadVector3(field["MoveLimitMin"]),
                 ReadVector3(field["MoveLimitMax"]),
@@ -955,6 +2229,7 @@ namespace BodyEditor.ReferenceModels
                 int maximumSteps,
                 Vector3 gravity,
                 Vector3 force,
+                IReadOnlyList<KoikatsuDynamicBoneColliderDefinition> colliders,
                 bool enabled)
             {
                 MotionRootPath = motionRootPath;
@@ -966,6 +2241,8 @@ namespace BodyEditor.ReferenceModels
                 MaximumSteps = maximumSteps;
                 Gravity = gravity;
                 Force = force;
+                Colliders = colliders ??
+                    Array.Empty<KoikatsuDynamicBoneColliderDefinition>();
                 Enabled = enabled;
             }
 
@@ -978,6 +2255,7 @@ namespace BodyEditor.ReferenceModels
             public int MaximumSteps { get; }
             public Vector3 Gravity { get; }
             public Vector3 Force { get; }
+            public IReadOnlyList<KoikatsuDynamicBoneColliderDefinition> Colliders { get; }
             public bool Enabled { get; }
         }
     }
@@ -992,6 +2270,7 @@ namespace BodyEditor.ReferenceModels
             float inert,
             bool calculateRotation,
             float nextBoneLengthScale,
+            float collisionRadius,
             bool limitMovement,
             Vector3 movementMinimum,
             Vector3 movementMaximum,
@@ -1011,6 +2290,7 @@ namespace BodyEditor.ReferenceModels
             Inert = Mathf.Clamp01(inert);
             CalculateRotation = calculateRotation;
             NextBoneLengthScale = Mathf.Max(0f, nextBoneLengthScale);
+            CollisionRadius = Mathf.Max(0f, collisionRadius);
             LimitMovement = limitMovement;
             MovementMinimum = movementMinimum;
             MovementMaximum = movementMaximum;
@@ -1031,6 +2311,7 @@ namespace BodyEditor.ReferenceModels
         public float Inert { get; }
         public bool CalculateRotation { get; }
         public float NextBoneLengthScale { get; }
+        public float CollisionRadius { get; }
         public bool LimitMovement { get; }
         public Vector3 MovementMinimum { get; }
         public Vector3 MovementMaximum { get; }
@@ -1044,7 +2325,7 @@ namespace BodyEditor.ReferenceModels
         public Vector3 EndOffset { get; }
     }
 
-    [DefaultExecutionOrder(220)]
+    [DefaultExecutionOrder(32010)]
     internal sealed class KoikatsuVer02SpringBone : MonoBehaviour
     {
         private const float Epsilon = 0.000001f;
@@ -1056,9 +2337,12 @@ namespace BodyEditor.ReferenceModels
         private int maximumSteps;
         private Vector3 gravity;
         private Vector3 force;
+        private float maximumAcceleration;
         private float accumulator;
         private Vector3 previousRootPosition;
         private bool configured;
+        private IReadOnlyList<KoikatsuDynamicBoneCollider> colliders =
+            Array.Empty<KoikatsuDynamicBoneCollider>();
 
         public bool Allowed { get; private set; }
 
@@ -1079,6 +2363,7 @@ namespace BodyEditor.ReferenceModels
             int requestedMaximumSteps,
             Vector3 requestedGravity,
             Vector3 requestedForce,
+            IReadOnlyList<KoikatsuDynamicBoneCollider> requestedColliders,
             bool allowed)
         {
             if (root == null)
@@ -1097,26 +2382,27 @@ namespace BodyEditor.ReferenceModels
 
             motionRoot = root;
             updateRate = Mathf.Max(0f, requestedUpdateRate);
-            reflectSpeed = Mathf.Max(0f, requestedReflectSpeed);
-            maximumSteps = Mathf.Max(1, requestedMaximumSteps);
+            reflectSpeed = Mathf.Clamp01(requestedReflectSpeed);
+            maximumSteps = Mathf.Clamp(requestedMaximumSteps, 1, 4);
             gravity = requestedGravity;
             force = requestedForce;
+            colliders = requestedColliders ??
+                Array.Empty<KoikatsuDynamicBoneCollider>();
             Allowed = allowed;
 
             var values = new List<Particle>(bones.Count + 1);
             for (var index = 0; index < bones.Count; index++)
             {
                 var parent = index > 0 ? values[index - 1] : null;
-                var localOffset = parent == null
-                    ? Vector3.zero
-                    : references[index - 1].InverseTransformPoint(
-                        references[index].position);
                 values.Add(new Particle(
                     bones[index],
                     references[index],
                     definitions[index],
                     parent,
-                    localOffset));
+                    parent == null
+                        ? Vector3.zero
+                        : parent.Transform.InverseTransformPoint(
+                            bones[index].position)));
             }
 
             values.Add(new Particle(
@@ -1126,6 +2412,7 @@ namespace BodyEditor.ReferenceModels
                 values[values.Count - 1],
                 endDefinition.EndOffset));
             particles = values.ToArray();
+            maximumAcceleration = CalculateMaximumAcceleration(particles);
             configured = particles.Length > 1;
             ResetSimulation();
         }
@@ -1229,7 +2516,9 @@ namespace BodyEditor.ReferenceModels
         {
             AnchorRoot();
             var objectScale = Mathf.Abs(motionRoot.lossyScale.x);
-            var acceleration = (gravity + force) * objectScale;
+            var acceleration = Vector3.ClampMagnitude(
+                (gravity + force) * objectScale,
+                maximumAcceleration * objectScale);
             for (var index = 1; index < particles.Length; index++)
             {
                 var particle = particles[index];
@@ -1274,6 +2563,7 @@ namespace BodyEditor.ReferenceModels
 
                 ApplyLengthLimit(particle, parent, restLength);
                 ApplyMovementLimit(particle, desired);
+                ApplyColliders(particle);
             }
         }
 
@@ -1336,6 +2626,27 @@ namespace BodyEditor.ReferenceModels
                 particle.Definition.MovementMinimum.z,
                 particle.Definition.MovementMaximum.z);
             particle.Position = matrix.MultiplyPoint3x4(local);
+        }
+
+        private void ApplyColliders(Particle particle)
+        {
+            if (particle == null || colliders.Count == 0)
+            {
+                return;
+            }
+
+            var particleRadius = particle.Definition.CollisionRadius *
+                                 Mathf.Abs(motionRoot.lossyScale.x);
+            var position = particle.Position;
+            for (var index = 0; index < colliders.Count; index++)
+            {
+                colliders[index].Collide(
+                    ref position,
+                    particleRadius);
+            }
+            var correction = position - particle.Position;
+            particle.Position = position;
+            particle.PreviousPosition += correction;
         }
 
         private void ApplyParticles()
@@ -1407,7 +2718,7 @@ namespace BodyEditor.ReferenceModels
                 addition = particle.Definition.CrushScaleMaximum * rate;
             }
 
-            particle.Transform.localScale = particle.Reference.localScale +
+            particle.Transform.localScale = particle.InitialLocalScale +
                                             new Vector3(
                                                 addition,
                                                 addition,
@@ -1419,11 +2730,24 @@ namespace BodyEditor.ReferenceModels
             for (var index = 0; index < particles.Length - 1; index++)
             {
                 var particle = particles[index];
-                particle.Transform.localPosition =
-                    particle.Reference.localPosition;
-                particle.Transform.localRotation =
-                    particle.Reference.localRotation;
-                particle.Transform.localScale = particle.Reference.localScale;
+                if (particle.Reference != null)
+                {
+                    particle.Transform.localPosition =
+                        particle.Reference.localPosition;
+                    particle.Transform.localRotation =
+                        particle.Reference.localRotation;
+                    particle.Transform.localScale =
+                        particle.Reference.localScale;
+                }
+                else
+                {
+                    particle.Transform.localPosition =
+                        particle.InitialLocalPosition;
+                    particle.Transform.localRotation =
+                        particle.InitialLocalRotation;
+                    particle.Transform.localScale =
+                        particle.InitialLocalScale;
+                }
             }
         }
 
@@ -1459,6 +2783,21 @@ namespace BodyEditor.ReferenceModels
             }
         }
 
+        private static float CalculateMaximumAcceleration(Particle[] values)
+        {
+            var maximumLength = 0f;
+            for (var index = 1; index < values.Length; index++)
+            {
+                maximumLength = Mathf.Max(
+                    maximumLength,
+                    Vector3.Distance(
+                        values[index - 1].Position,
+                        values[index].Position));
+            }
+
+            return Mathf.Max(0.001f, maximumLength * 0.2f);
+        }
+
         private sealed class Particle
         {
             public Particle(
@@ -1473,6 +2812,15 @@ namespace BodyEditor.ReferenceModels
                 Definition = definition;
                 Parent = parent;
                 LocalOffset = localOffset;
+                InitialLocalPosition = transform != null
+                    ? transform.localPosition
+                    : Vector3.zero;
+                InitialLocalRotation = transform != null
+                    ? transform.localRotation
+                    : Quaternion.identity;
+                InitialLocalScale = transform != null
+                    ? transform.localScale
+                    : Vector3.one;
                 Position = transform != null
                     ? transform.position
                     : parent.Transform.TransformPoint(localOffset);
@@ -1484,16 +2832,20 @@ namespace BodyEditor.ReferenceModels
             public Ver02ParticleDefinition Definition { get; }
             public Particle Parent { get; }
             public Vector3 LocalOffset { get; }
+            public Vector3 InitialLocalPosition { get; }
+            public Quaternion InitialLocalRotation { get; }
+            public Vector3 InitialLocalScale { get; }
             public Vector3 Position { get; set; }
             public Vector3 PreviousPosition { get; set; }
         }
     }
 
-    [DefaultExecutionOrder(200)]
+    [DefaultExecutionOrder(32000)]
     internal sealed class KoikatsuSpringBone : MonoBehaviour
     {
         private const float Epsilon = 0.000001f;
         private const int MaximumSteps = 3;
+        private const int ConstraintIterations = 2;
 
         private Transform springRoot;
         private Particle[] particles = Array.Empty<Particle>();
@@ -1502,12 +2854,16 @@ namespace BodyEditor.ReferenceModels
         private float elasticity;
         private float stiffness;
         private float inert;
+        private float radius;
         private Vector3 gravity;
         private Vector3 force;
+        private float maximumAcceleration;
         private int freezeAxis;
         private float accumulator;
-        private Vector3 previousOwnerPosition;
+        private Vector3 previousRootPosition;
         private bool configured;
+        private IReadOnlyList<KoikatsuDynamicBoneCollider> colliders =
+            Array.Empty<KoikatsuDynamicBoneCollider>();
 
         public bool Allowed { get; private set; }
 
@@ -1518,12 +2874,14 @@ namespace BodyEditor.ReferenceModels
             float requestedElasticity,
             float requestedStiffness,
             float requestedInert,
+            float requestedRadius,
             float endLength,
             Vector3 endOffset,
             Vector3 requestedGravity,
             Vector3 requestedForce,
             int requestedFreezeAxis,
             IReadOnlyCollection<Transform> exclusions,
+            IReadOnlyList<KoikatsuDynamicBoneCollider> requestedColliders,
             bool allowed)
         {
             springRoot = root ?? throw new ArgumentNullException(nameof(root));
@@ -1532,9 +2890,12 @@ namespace BodyEditor.ReferenceModels
             elasticity = Mathf.Clamp01(requestedElasticity);
             stiffness = Mathf.Clamp01(requestedStiffness);
             inert = Mathf.Clamp01(requestedInert);
+            radius = Mathf.Max(0f, requestedRadius);
             gravity = requestedGravity;
             force = requestedForce;
             freezeAxis = Mathf.Clamp(requestedFreezeAxis, 0, 3);
+            colliders = requestedColliders ??
+                Array.Empty<KoikatsuDynamicBoneCollider>();
             Allowed = allowed;
 
             var excluded = exclusions == null
@@ -1549,6 +2910,18 @@ namespace BodyEditor.ReferenceModels
                 endLength,
                 endOffset);
             particles = values.ToArray();
+            var maximumDepth = 1;
+            for (var index = 0; index < particles.Length; index++)
+            {
+                maximumDepth = Mathf.Max(maximumDepth, particles[index].Depth);
+            }
+            for (var index = 0; index < particles.Length; index++)
+            {
+                particles[index].Radius = radius;
+                particles[index].DepthRatio = Mathf.Clamp01(
+                    (float)particles[index].Depth / maximumDepth);
+            }
+            maximumAcceleration = CalculateMaximumAcceleration(particles);
             configured = particles.Length > 1;
             ResetSimulation();
         }
@@ -1601,8 +2974,8 @@ namespace BodyEditor.ReferenceModels
                 return;
             }
 
-            var ownerMove = transform.position - previousOwnerPosition;
-            previousOwnerPosition = transform.position;
+            var ownerMove = springRoot.position - previousRootPosition;
+            previousRootPosition = springRoot.position;
             var steps = CalculateStepCount(Time.deltaTime);
             if (steps == 0)
             {
@@ -1650,7 +3023,9 @@ namespace BodyEditor.ReferenceModels
         {
             AnchorRoot();
             var objectScale = Mathf.Abs(transform.lossyScale.x);
-            var acceleration = (gravity + force) * objectScale;
+            var acceleration = Vector3.ClampMagnitude(
+                (gravity + force) * objectScale,
+                maximumAcceleration * objectScale);
             for (var index = 1; index < particles.Length; index++)
             {
                 var particle = particles[index];
@@ -1664,37 +3039,75 @@ namespace BodyEditor.ReferenceModels
 
         private void ConstrainParticles()
         {
-            for (var index = 1; index < particles.Length; index++)
+            for (var iteration = 0;
+                 iteration < ConstraintIterations;
+                 iteration++)
             {
-                var particle = particles[index];
-                var parent = particles[particle.ParentIndex];
-                var localOffset = particle.LocalOffset;
-                var desired = parent.Position +
-                              parent.Transform.TransformVector(localOffset);
-                particle.Position += (desired - particle.Position) * elasticity;
-
-                var stiffnessLimit = particle.Length *
-                                     (1f - stiffness) * 2f;
-                var displacement = desired - particle.Position;
-                if (stiffnessLimit <= 0f)
+                for (var index = 1; index < particles.Length; index++)
                 {
-                    particle.Position = desired;
-                }
-                else if (displacement.sqrMagnitude >
-                         stiffnessLimit * stiffnessLimit)
-                {
-                    particle.Position += displacement.normalized *
-                                         (displacement.magnitude - stiffnessLimit);
-                }
-
-                ApplyFreezeAxis(parent, particle);
-                var direction = particle.Position - parent.Position;
-                if (direction.sqrMagnitude > Epsilon)
-                {
-                    particle.Position = parent.Position +
-                                        direction.normalized * particle.Length;
+                    var particle = particles[index];
+                    var parent = particles[particle.ParentIndex];
+                    var desired = parent.Position +
+                                  parent.Transform.TransformVector(
+                                      particle.LocalOffset);
+                    var retention = Mathf.Lerp(
+                        0.96f,
+                        0.48f,
+                        particle.DepthRatio);
+                    retention *= Mathf.Lerp(0.85f, 1f, stiffness);
+                    retention *= Mathf.Lerp(0.75f, 1f, elasticity);
+                    retention = 1f - Mathf.Pow(
+                        1f - Mathf.Clamp01(retention),
+                        1f / ConstraintIterations);
+                    particle.Position = Vector3.Lerp(
+                        particle.Position,
+                        desired,
+                        retention);
+                    ApplyRestCone(particle, parent, desired);
+                    ApplyFreezeAxis(parent, particle);
+                    EnforceLength(particle, parent);
+                    ApplyColliders(particle);
                 }
             }
+        }
+
+        private static void EnforceLength(Particle particle, Particle parent)
+        {
+            var direction = particle.Position - parent.Position;
+            if (direction.sqrMagnitude > Epsilon)
+            {
+                particle.Position = parent.Position +
+                                    direction.normalized * particle.Length;
+            }
+        }
+
+        private static void ApplyRestCone(
+            Particle particle,
+            Particle parent,
+            Vector3 desired)
+        {
+            var rest = desired - parent.Position;
+            var current = particle.Position - parent.Position;
+            if (rest.sqrMagnitude <= Epsilon || current.sqrMagnitude <= Epsilon)
+            {
+                return;
+            }
+
+            var maximumAngle = Mathf.Lerp(22f, 78f, particle.DepthRatio) *
+                               Mathf.Deg2Rad;
+            var angle = Vector3.Angle(rest, current) * Mathf.Deg2Rad;
+            if (angle <= maximumAngle)
+            {
+                return;
+            }
+
+            current = Vector3.RotateTowards(
+                rest,
+                current,
+                angle - maximumAngle,
+                0f);
+            particle.Position = parent.Position + current.normalized *
+                                 particle.Length;
         }
 
         private void ApplyFreezeAxis(Particle parent, Particle particle)
@@ -1719,6 +3132,27 @@ namespace BodyEditor.ReferenceModels
                                  Vector3.Dot(
                                      particle.Position - parent.Position,
                                      normal);
+        }
+
+        private void ApplyColliders(Particle particle)
+        {
+            if (particle == null || colliders.Count == 0)
+            {
+                return;
+            }
+
+            var particleRadius = particle.Radius *
+                                 Mathf.Abs(transform.lossyScale.x);
+            var position = particle.Position;
+            for (var index = 0; index < colliders.Count; index++)
+            {
+                colliders[index].Collide(
+                    ref position,
+                    particleRadius);
+            }
+            var correction = position - particle.Position;
+            particle.Position = position;
+            particle.PreviousPosition += correction;
         }
 
         private void ApplyParticles()
@@ -1783,7 +3217,9 @@ namespace BodyEditor.ReferenceModels
         private void ResetSimulation()
         {
             accumulator = 0f;
-            previousOwnerPosition = transform.position;
+            previousRootPosition = springRoot != null
+                ? springRoot.position
+                : transform.position;
             for (var index = 0; index < particles.Length; index++)
             {
                 var particle = particles[index];
@@ -1801,6 +3237,21 @@ namespace BodyEditor.ReferenceModels
 
             return particle.Parent.Transform.TransformPoint(
                 particle.LocalOffset);
+        }
+
+        private static float CalculateMaximumAcceleration(Particle[] values)
+        {
+            var maximumLength = 0f;
+            for (var index = 1; index < values.Length; index++)
+            {
+                maximumLength = Mathf.Max(
+                    maximumLength,
+                    Vector3.Distance(
+                        values[index].Position,
+                        values[index].Parent.Position));
+            }
+
+            return Mathf.Max(0.001f, maximumLength * 0.2f);
         }
 
         private static void AppendParticles(
@@ -1891,6 +3342,7 @@ namespace BodyEditor.ReferenceModels
                 InitialLocalRotation = initialLocalRotation;
                 VirtualOffset = virtualOffset;
                 Parent = parent;
+                Depth = parent == null ? 0 : parent.Depth + 1;
                 Position = transform != null
                     ? transform.position
                     : parent.Transform.TransformPoint(virtualOffset);
@@ -1906,10 +3358,13 @@ namespace BodyEditor.ReferenceModels
             public Quaternion InitialLocalRotation { get; }
             public Vector3 VirtualOffset { get; }
             public Particle Parent { get; }
+            public int Depth { get; }
+            public float DepthRatio { get; set; }
             public Vector3 LocalOffset => Transform != null
                 ? InitialLocalPosition
                 : VirtualOffset;
             public float Length { get; set; }
+            public float Radius { get; set; }
             public Vector3 Position { get; set; }
             public Vector3 PreviousPosition { get; set; }
         }
@@ -1967,8 +3422,49 @@ namespace BodyEditor.ReferenceModels
             var cloth = root.GetComponentsInChildren<Cloth>(true);
             for (var index = 0; index < cloth.Length; index++)
             {
-                cloth[index].enabled = enabled;
+                // A legacy prefab can carry both a Cloth component and bone
+                // spring metadata. Let one solver own that branch; running
+                // both against the same skinned mesh causes unstable double
+                // deformation.
+                cloth[index].enabled = enabled &&
+                                       !HasBoneSolverInBranch(
+                                           cloth[index].transform,
+                                           root.transform);
             }
+
+            if (enabled)
+            {
+                var itemPoses = root.GetComponentsInChildren<
+                    KoikatsuStudioItemPose>(true);
+                for (var index = 0; index < itemPoses.Length; index++)
+                {
+                    itemPoses[index].SuppressFkPhysics();
+                }
+            }
+        }
+
+        private static bool HasBoneSolverInBranch(
+            Transform start,
+            Transform root)
+        {
+            var current = start;
+            while (current != null)
+            {
+                if (current.GetComponent<KoikatsuSpringBone>() != null ||
+                    current.GetComponent<KoikatsuVer02SpringBone>() != null)
+                {
+                    return true;
+                }
+
+                if (current == root)
+                {
+                    break;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
         }
 
         public static void SetBustAllowed(GameObject root, bool allowed)

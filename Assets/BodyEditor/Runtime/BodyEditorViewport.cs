@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BodyEditor.ReferenceModels;
+using BodyEditor.Settings;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -12,15 +13,19 @@ namespace BodyEditor.Viewport
         Z,
     }
 
-    [RequireComponent(typeof(ReferenceModelImportController))]
+    [RequireComponent(typeof(SceneContentController))]
     public sealed class BodyEditorViewport : MonoBehaviour
     {
         private const float MinDistance = 0.05f;
         private const float MaxDistance = 2000f;
 
-        private ReferenceModelImportController importController;
+        private SceneContentController importController;
         [SerializeField] private ViewportControlSettings controls = new ViewportControlSettings();
         private Camera viewportCamera;
+        private Camera defaultViewportCamera;
+        private Camera importedViewportCamera;
+        private Camera navigationCamera;
+        private bool importedCameraAllowsNavigation;
         private ViewportGrid grid;
         private Vector3 focus = new Vector3(0f, 1f, 0f);
         private float distance = 8f;
@@ -34,6 +39,8 @@ namespace BodyEditor.Viewport
         public ViewportControlSettings Controls => controls;
 
         public Quaternion ViewRotation => Quaternion.Euler(pitch, yaw, roll);
+
+        public Camera ViewportCamera => EnsureCamera() ? viewportCamera : null;
 
         public bool TryCreatePointerRay(
             Vector2 normalizedPanelPosition,
@@ -56,23 +63,37 @@ namespace BodyEditor.Viewport
 
         private void OnEnable()
         {
-            importController = GetComponent<ReferenceModelImportController>();
+            importController = GetComponent<SceneContentController>();
             importController.StateChanged += HandleImportStateChanged;
+            BodyEditorSettings.Changed += HandleEditorSettingsChanged;
+            HandleEditorSettingsChanged();
             grid = new ViewportGrid(transform);
-            EnsureCamera();
+            if (EnsureCamera())
+            {
+                defaultViewportCamera = viewportCamera;
+            }
         }
 
         private void LateUpdate()
         {
             if (EnsureCamera())
             {
-                ApplyCameraPose();
+                if (!IsUsingLockedImportedCamera())
+                {
+                    ApplyCameraPose();
+                }
+
                 grid?.Refresh(focus, distance);
             }
         }
 
         public void Orbit(Vector2 pointerDelta)
         {
+            if (IsUsingLockedImportedCamera())
+            {
+                return;
+            }
+
             if (EnsureCamera())
             {
                 viewportCamera.orthographic = false;
@@ -85,6 +106,11 @@ namespace BodyEditor.Viewport
 
         public void Pan(Vector2 pointerDelta)
         {
+            if (IsUsingLockedImportedCamera())
+            {
+                return;
+            }
+
             if (!EnsureCamera())
             {
                 return;
@@ -101,6 +127,11 @@ namespace BodyEditor.Viewport
 
         public void Zoom(float wheelDelta)
         {
+            if (IsUsingLockedImportedCamera())
+            {
+                return;
+            }
+
             distance = Mathf.Clamp(
                 distance * Mathf.Exp(wheelDelta * 0.08f),
                 MinDistance,
@@ -109,6 +140,11 @@ namespace BodyEditor.Viewport
 
         public void AlignToAxis(ViewportAxis axis)
         {
+            if (IsUsingLockedImportedCamera())
+            {
+                return;
+            }
+
             if (!EnsureCamera())
             {
                 return;
@@ -154,7 +190,15 @@ namespace BodyEditor.Viewport
                 return true;
             }
 
-            viewportCamera = Camera.main;
+            if (defaultViewportCamera != null)
+            {
+                viewportCamera = defaultViewportCamera;
+            }
+
+            if (viewportCamera == null)
+            {
+                viewportCamera = Camera.main;
+            }
             if (viewportCamera == null)
             {
                 viewportCamera = FindAnyObjectByType<Camera>();
@@ -168,6 +212,7 @@ namespace BodyEditor.Viewport
             viewportCamera.clearFlags = CameraClearFlags.SolidColor;
             viewportCamera.backgroundColor = new Color(0.105f, 0.115f, 0.125f, 1f);
             viewportCamera.orthographic = false;
+            viewportCamera.enabled = true;
             ApplyCameraPose();
             return true;
         }
@@ -197,8 +242,19 @@ namespace BodyEditor.Viewport
             if (importController.Status != ReferenceModelImportStatus.Ready ||
                 importController.Current?.Root == null)
             {
+                RestoreDefaultCamera();
                 return;
             }
+
+            if (importController.Current is
+                    IReferenceSceneCameraProvider sceneCameras &&
+                sceneCameras.ActiveCamera != null)
+            {
+                ActivateReferenceCamera(sceneCameras.ActiveCamera);
+                return;
+            }
+
+            RestoreDefaultCamera();
 
             if (importController.Current is IReferenceModelCameraProvider provider &&
                 provider.TryGetCamera(out var pose))
@@ -235,6 +291,96 @@ namespace BodyEditor.Viewport
             ApplyCameraPose();
         }
 
+        internal void ActivateReferenceCamera(Camera camera)
+        {
+            if (camera == null)
+            {
+                return;
+            }
+
+            if (defaultViewportCamera == null &&
+                viewportCamera != null &&
+                importedViewportCamera == null)
+            {
+                defaultViewportCamera = viewportCamera;
+            }
+
+            if (viewportCamera != null && viewportCamera != camera)
+            {
+                viewportCamera.enabled = false;
+                if (viewportCamera.CompareTag("MainCamera"))
+                {
+                    viewportCamera.tag = "Untagged";
+                }
+            }
+
+            importedViewportCamera = camera;
+            viewportCamera = camera;
+            viewportCamera.gameObject.SetActive(true);
+            viewportCamera.enabled = true;
+            viewportCamera.tag = "MainCamera";
+            viewportCamera.clearFlags = CameraClearFlags.SolidColor;
+            viewportCamera.backgroundColor = new Color(
+                0.105f,
+                0.115f,
+                0.125f,
+                1f);
+
+            var provider = importController?.Current as
+                IReferenceSceneCameraProvider;
+            importedCameraAllowsNavigation =
+                provider != null && provider.FreeCamera == camera;
+            if (importedCameraAllowsNavigation)
+            {
+                if (navigationCamera != camera &&
+                    provider.TryGetCamera(out var pose))
+                {
+                    ApplyReferenceCamera(pose);
+                    navigationCamera = camera;
+                }
+                else
+                {
+                    ApplyCameraPose();
+                }
+            }
+        }
+
+        private bool IsUsingLockedImportedCamera()
+        {
+            return importedViewportCamera != null &&
+                   viewportCamera == importedViewportCamera &&
+                   !importedCameraAllowsNavigation;
+        }
+
+        private void RestoreDefaultCamera()
+        {
+            if (importedViewportCamera != null)
+            {
+                importedViewportCamera.enabled = false;
+                if (importedViewportCamera.CompareTag("MainCamera"))
+                {
+                    importedViewportCamera.tag = "Untagged";
+                }
+            }
+
+            importedViewportCamera = null;
+            navigationCamera = null;
+            importedCameraAllowsNavigation = false;
+            if (defaultViewportCamera == null)
+            {
+                viewportCamera = null;
+                EnsureCamera();
+                defaultViewportCamera = viewportCamera;
+                return;
+            }
+
+            viewportCamera = defaultViewportCamera;
+            viewportCamera.gameObject.SetActive(true);
+            viewportCamera.enabled = true;
+            viewportCamera.tag = "MainCamera";
+            ApplyCameraPose();
+        }
+
         public void Frame(GameObject root)
         {
             var renderers = root.GetComponentsInChildren<Renderer>(true);
@@ -268,6 +414,8 @@ namespace BodyEditor.Viewport
 
         private void OnDisable()
         {
+            RestoreDefaultCamera();
+            BodyEditorSettings.Changed -= HandleEditorSettingsChanged;
             if (importController != null)
             {
                 importController.StateChanged -= HandleImportStateChanged;
@@ -275,6 +423,11 @@ namespace BodyEditor.Viewport
 
             grid?.Dispose();
             grid = null;
+        }
+
+        private void HandleEditorSettingsChanged()
+        {
+            BodyEditorSettings.ApplyTo(controls);
         }
     }
 

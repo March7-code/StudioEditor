@@ -191,9 +191,11 @@ namespace BodyEditor.ReferenceModels
                 RenderTextureFormat.ARGB32,
                 RenderTextureReadWrite.Default);
             var previous = RenderTexture.active;
+            var previousSrgbWrite = GL.sRGBWrite;
             Texture2D result = null;
             try
             {
+                GL.sRGBWrite = true;
                 Graphics.Blit(source, target, material, 0);
                 RenderTexture.active = target;
                 result = new Texture2D(
@@ -221,6 +223,7 @@ namespace BodyEditor.ReferenceModels
             }
             finally
             {
+                GL.sRGBWrite = previousSrgbWrite;
                 RenderTexture.active = previous;
                 RenderTexture.ReleaseTemporary(target);
             }

@@ -7,7 +7,7 @@ namespace BodyEditor.UI
 {
     internal sealed class ReferenceModelSidebar : VisualElement
     {
-        private readonly ReferenceModelImportController importController;
+        private readonly SceneContentController importController;
         private readonly ReferenceModelPresentationController presentation;
         private readonly Label modelName;
         private readonly Label sourceName;
@@ -22,7 +22,7 @@ namespace BodyEditor.UI
         private bool updatingVariant;
 
         public ReferenceModelSidebar(
-            ReferenceModelImportController importController,
+            SceneContentController importController,
             ReferenceModelPresentationController presentation)
         {
             this.importController = importController;

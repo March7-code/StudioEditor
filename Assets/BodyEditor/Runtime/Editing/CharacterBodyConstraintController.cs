@@ -28,7 +28,7 @@ namespace BodyEditor.Editing
                 for (var index = 0; index < rigs.Count; index++)
                 {
                     rigs[index].Enabled = value;
-                    rigs[index].Model.PoseCoordinator?.EvaluateNow();
+                    rigs[index].Model.Controls?.Pose?.Pipeline?.EvaluateNow();
                 }
             }
         }

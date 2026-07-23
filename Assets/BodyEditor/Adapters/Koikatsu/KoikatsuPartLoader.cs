@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using BodyEditor.Rendering;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -260,6 +261,16 @@ namespace BodyEditor.ReferenceModels
 
         public KoikatsuCardHairPart HairMaterial { get; set; }
 
+        public Texture2D HairGlossTexture { get; set; }
+
+        public KoikatsuTextureLoader TextureLoader { get; set; }
+
+        public int MaterialEditorObjectType { get; set; } = -1;
+
+        public int MaterialEditorCoordinateIndex { get; set; } = -1;
+
+        public int MaterialEditorSlot { get; set; } = -1;
+
         public KoikatsuCardClothesPart ClothesMaterial { get; set; }
 
         public KoikatsuCardAccessory AccessoryMaterial { get; set; }
@@ -269,6 +280,115 @@ namespace BodyEditor.ReferenceModels
         public KoikatsuTextureSet Textures { get; set; }
 
         public KoikatsuBakedClothesTextures BakedClothesTextures { get; set; }
+
+        public bool PhysicsAllowed
+        {
+            get
+            {
+                if (HairMaterial != null)
+                {
+                    return !HairMaterial.NoShake;
+                }
+
+                if (AccessoryMaterial != null)
+                {
+                    return !AccessoryMaterial.NoShake;
+                }
+
+                return true;
+            }
+        }
+    }
+
+    [DefaultExecutionOrder(31000)]
+    internal sealed class KoikatsuBoneProxyFollower : MonoBehaviour
+    {
+        private Binding[] bindings = Array.Empty<Binding>();
+
+        public static bool RequiresProxy(
+            Transform root,
+            IReadOnlyDictionary<string, Transform> targetBones)
+        {
+            if (root == null || targetBones == null)
+            {
+                return false;
+            }
+
+            var transforms = root.GetComponentsInChildren<Transform>(true);
+            for (var index = 0; index < transforms.Length; index++)
+            {
+                if (!targetBones.ContainsKey(transforms[index].name))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public void Configure(
+            Transform sourceRoot,
+            IReadOnlyDictionary<string, Transform> targetBones)
+        {
+            if (sourceRoot == null)
+            {
+                throw new ArgumentNullException(nameof(sourceRoot));
+            }
+
+            if (targetBones == null)
+            {
+                throw new ArgumentNullException(nameof(targetBones));
+            }
+
+            var values = new List<Binding>();
+            var sources = sourceRoot.GetComponentsInChildren<Transform>(true);
+            for (var index = 0; index < sources.Length; index++)
+            {
+                var source = sources[index];
+                if (targetBones.TryGetValue(source.name, out var target) &&
+                    target != null && target != source)
+                {
+                    values.Add(new Binding(source, target));
+                }
+            }
+
+            bindings = values.ToArray();
+            Synchronize();
+        }
+
+        private void LateUpdate()
+        {
+            Synchronize();
+        }
+
+        private void Synchronize()
+        {
+            for (var index = 0; index < bindings.Length; index++)
+            {
+                var binding = bindings[index];
+                if (binding.Source == null || binding.Target == null)
+                {
+                    continue;
+                }
+
+                binding.Source.localPosition = binding.Target.localPosition;
+                binding.Source.localRotation = binding.Target.localRotation;
+                binding.Source.localScale = binding.Target.localScale;
+            }
+        }
+
+        private readonly struct Binding
+        {
+            public Binding(Transform source, Transform target)
+            {
+                Source = source;
+                Target = target;
+            }
+
+            public Transform Source { get; }
+
+            public Transform Target { get; }
+        }
     }
 
     internal sealed class KoikatsuPartLoader
@@ -400,11 +520,18 @@ namespace BodyEditor.ReferenceModels
                     RebindSkinning(instance, options);
                 }
 
+                options.TextureLoader?.ApplyMaterialEditorProperties(
+                    instance,
+                    options.MaterialEditorObjectType,
+                    options.MaterialEditorCoordinateIndex,
+                    options.MaterialEditorSlot);
+
                 if (options.HairMaterial != null)
                 {
                     KoikatsuMaterialConverter.ConvertHair(
                         instance,
                         options.HairMaterial,
+                        options.HairGlossTexture,
                         runtimeMaterials);
                 }
                 else if (options.ClothesMaterial != null)
@@ -419,10 +546,16 @@ namespace BodyEditor.ReferenceModels
                 }
                 else if (options.AccessoryMaterial != null)
                 {
+                    var accessoryRendererMap =
+                        KoikatsuAccessoryRendererMapLoader.TryCreate(
+                            loadedSource,
+                            asset.AssetName,
+                            instance);
                     KoikatsuMaterialConverter.ConvertAccessory(
                         instance,
                         options.AccessoryMaterial,
                         options.AccessoryHairMaterial,
+                        accessoryRendererMap,
                         runtimeMaterials);
                 }
                 else
@@ -432,10 +565,25 @@ namespace BodyEditor.ReferenceModels
                         runtimeMaterials);
                 }
 
+                // A baked map may have replaced MainTex during conversion;
+                // MaterialEditor overrides are the final source of truth.
+                options.TextureLoader?.ApplyMaterialEditorProperties(
+                    instance,
+                    options.MaterialEditorObjectType,
+                    options.MaterialEditorCoordinateIndex,
+                    options.MaterialEditorSlot);
+
                 KoikatsuSpringBoneMetadataLoader.Attach(
                     loadedSource,
                     asset.AssetName,
-                    instance);
+                    instance,
+                    options.PhysicsAllowed);
+
+                KoikatsuVer02MetadataLoader.Attach(
+                    loadedSource,
+                    asset.AssetName,
+                    instance,
+                    options.PhysicsAllowed);
 
                 leases.Add(lease);
                 lease = null;
@@ -480,6 +628,10 @@ namespace BodyEditor.ReferenceModels
                                     KoikatsuSkinningMode.Body
                 ? "cf_j_root"
                 : "cf_J_N_FaceRoot";
+            var duplicateRoot = FindByName(model.transform, duplicateRootName);
+            var preserveLocalSkeleton = KoikatsuBoneProxyFollower.RequiresProxy(
+                duplicateRoot,
+                options.TargetBones);
             var renderers = model.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             for (var rendererIndex = 0;
                  rendererIndex < renderers.Length;
@@ -520,12 +672,20 @@ namespace BodyEditor.ReferenceModels
                 }
             }
 
-            var duplicateRoot = FindByName(model.transform, duplicateRootName);
             if (duplicateRoot != null)
             {
-                duplicateRoot.SetParent(null, false);
-                KoikatsuCharacterAssembler.DestroyRuntimeObject(
-                    duplicateRoot.gameObject);
+                if (preserveLocalSkeleton)
+                {
+                    model.AddComponent<KoikatsuBoneProxyFollower>().Configure(
+                        duplicateRoot,
+                        options.TargetBones);
+                }
+                else
+                {
+                    duplicateRoot.SetParent(null, false);
+                    KoikatsuCharacterAssembler.DestroyRuntimeObject(
+                        duplicateRoot.gameObject);
+                }
             }
         }
 
@@ -743,12 +903,18 @@ namespace BodyEditor.ReferenceModels
 
     internal sealed class KoikatsuTextureLoader
     {
+        // MaterialEditor leaves uploaded textures at Unity's repeat default;
+        // modded meshes can intentionally address them with negative UVs.
+        private const TextureWrapMode MaterialEditorTextureWrapMode =
+            TextureWrapMode.Repeat;
+
         private readonly string abdataRoot;
         private readonly KoikatsuListCatalog catalog;
         private readonly List<KoikatsuAssetBundleLease> leases;
         private readonly ICollection<Texture2D> runtimeTextures;
         private readonly KoikatsuCard card;
         private readonly KoikatsuMaterialEditorData materialEditorData;
+        private readonly KoikatsuSkinOverlayData skinOverlayData;
         private readonly Dictionary<string, KoikatsuAssetBundleLease> bundles =
             new Dictionary<string, KoikatsuAssetBundleLease>(
                 StringComparer.OrdinalIgnoreCase);
@@ -769,7 +935,10 @@ namespace BodyEditor.ReferenceModels
             this.leases = leases ??
                 throw new ArgumentNullException(nameof(leases));
             this.card = card;
-            materialEditorData = KoikatsuMaterialEditorData.Read(card?.Blocks);
+            materialEditorData = KoikatsuMaterialEditorData.Read(
+                card?.Blocks,
+                card?.MaterialEditorSharedTextures);
+            skinOverlayData = KoikatsuSkinOverlayData.Read(card?.Blocks);
             this.runtimeTextures = runtimeTextures ??
                 throw new ArgumentNullException(nameof(runtimeTextures));
         }
@@ -805,7 +974,7 @@ namespace BodyEditor.ReferenceModels
             {
                 name = $"Koikatsu MaterialEditor {materialName} {propertyName}",
                 filterMode = FilterMode.Bilinear,
-                wrapMode = TextureWrapMode.Clamp,
+                wrapMode = MaterialEditorTextureWrapMode,
             };
             if (!ImageConversion.LoadImage(texture, bytes, false))
             {
@@ -821,6 +990,465 @@ namespace BodyEditor.ReferenceModels
             return texture;
         }
 
+        public Texture2D LoadSkinOverlayTexture(
+            int coordinateIndex,
+            KoikatsuSkinOverlayType type)
+        {
+            var cacheKey = "KSOX\n" + coordinateIndex + "\n" + (int)type;
+            if (looseTextures.TryGetValue(cacheKey, out var cached))
+            {
+                return cached;
+            }
+
+            if (skinOverlayData == null ||
+                !skinOverlayData.TryGetTexture(
+                    coordinateIndex,
+                    type,
+                    out var bytes))
+            {
+                return null;
+            }
+
+            var texture = new Texture2D(
+                2,
+                2,
+                TextureFormat.RGBA32,
+                false,
+                false)
+            {
+                name = $"Koikatsu KSOX {(int)type} ({coordinateIndex})",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            if (!ImageConversion.LoadImage(texture, bytes, false))
+            {
+                KoikatsuCharacterAssembler.DestroyRuntimeObject(texture);
+                Debug.LogWarning(
+                    $"Could not decode KSOX skin overlay type {(int)type} " +
+                    $"for coordinate {coordinateIndex}.");
+                return null;
+            }
+
+            looseTextures.Add(cacheKey, texture);
+            runtimeTextures.Add(texture);
+            return texture;
+        }
+
+        public void ApplyMaterialEditorProperties(
+            GameObject model,
+            int objectType,
+            int coordinateIndex = -1,
+            int slot = -1)
+        {
+            if (model == null || materialEditorData == null || objectType < 0)
+            {
+                return;
+            }
+
+            var renderers = model.GetComponentsInChildren<Renderer>(true);
+            for (var rendererIndex = 0;
+                 rendererIndex < renderers.Length;
+                 rendererIndex++)
+            {
+                var renderer = renderers[rendererIndex];
+                var materials = renderer.materials;
+                var appliedTexture = false;
+                for (var materialIndex = 0;
+                     materialIndex < materials.Length;
+                     materialIndex++)
+                {
+                    var material = materials[materialIndex];
+                    if (material == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var property in materialEditorData.GetTextureProperties(
+                                 objectType,
+                                 coordinateIndex,
+                                 slot,
+                                 material.name))
+                    {
+                        if (!materialEditorData.TryGetTextureData(
+                                property.TextureId.Value,
+                                out var bytes))
+                        {
+                            continue;
+                        }
+
+                        var texture = DecodeMaterialEditorTexture(
+                            material.name,
+                            property.Property,
+                            property.TextureId.Value,
+                            bytes);
+                        if (texture != null)
+                        {
+                            SetMaterialTexture(
+                                material,
+                                property.Property,
+                                texture);
+                            if (IsFaceDetailRenderer(renderer.name))
+                            {
+                                // ApplyFaceTexture may have hidden an empty
+                                // layer with an alpha-zero base color. A
+                                // MaterialEditor replacement is authoritative
+                                // and must restore its alpha. Preserve the
+                                // card-authored RGB for visible eye lines and
+                                // brows; replacing every face-detail color
+                                // with white erases eyelineColor and the
+                                // skin-colored shadow material.
+                                RestoreFaceDetailBaseColorAlpha(material);
+                            }
+                            appliedTexture = true;
+                        }
+                    }
+
+                    foreach (var property in materialEditorData.GetColorProperties(
+                                 objectType,
+                                 coordinateIndex,
+                                 slot,
+                                 material.name))
+                    {
+                        SetMaterialColor(
+                            material,
+                            property.Property,
+                            property.Value.ToColor(Color.white));
+                    }
+
+                    foreach (var property in materialEditorData.GetFloatProperties(
+                                 objectType,
+                                 coordinateIndex,
+                                 slot,
+                                 material.name))
+                    {
+                        if (float.TryParse(
+                                property.Value,
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var value))
+                        {
+                            SetMaterialFloat(
+                                material,
+                                property.Property,
+                                value);
+                        }
+                    }
+
+                }
+
+                // Face-detail renderers can be disabled when their card
+                // texture is explicitly empty. A MaterialEditor override is
+                // an authoritative replacement and must make the layer
+                // visible again.
+                if (appliedTexture)
+                {
+                    // The converted material may have been created while the
+                    // card layer was empty, so its copied render state is
+                    // opaque even though the MaterialEditor replacement is
+                    // an alpha texture. Restore the render state used by the
+                    // original face-detail pass before enabling it.
+                    if (IsFaceDetailRenderer(renderer.name))
+                    {
+                        for (var materialIndex = 0;
+                             materialIndex < materials.Length;
+                             materialIndex++)
+                        {
+                            MaterialRenderUtility.ConfigureTransparent(
+                                materials[materialIndex]);
+                        }
+                    }
+
+                    renderer.enabled = true;
+                }
+            }
+        }
+
+        private static bool IsFaceDetailRenderer(string rendererName)
+        {
+            var key = (rendererName ?? string.Empty).ToLowerInvariant();
+            return key == "cf_o_eyeline" ||
+                   key == "cf_o_eyeline_low" ||
+                   key == "cf_o_mayuge" ||
+                   key == "cf_o_noseline";
+        }
+
+        private static void RestoreFaceDetailBaseColorAlpha(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            var color = material.HasProperty("_BaseColor")
+                ? material.GetColor("_BaseColor")
+                : material.color;
+            if (color.a > 0f)
+            {
+                return;
+            }
+
+            color.a = 1f;
+            MaterialRenderUtility.SetBaseColor(material, color);
+        }
+
+        private Texture2D DecodeMaterialEditorTexture(
+            string materialName,
+            string propertyName,
+            int textureId,
+            byte[] bytes)
+        {
+            var cacheKey = "MaterialEditor\n" + materialName + "\n" +
+                           propertyName + "\n" + textureId;
+            if (looseTextures.TryGetValue(cacheKey, out var cached))
+            {
+                return cached;
+            }
+
+            var texture = new Texture2D(
+                2,
+                2,
+                TextureFormat.RGBA32,
+                false,
+                false)
+            {
+                name = $"Koikatsu MaterialEditor {materialName} {propertyName}",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = MaterialEditorTextureWrapMode,
+            };
+            if (!ImageConversion.LoadImage(texture, bytes, false))
+            {
+                KoikatsuCharacterAssembler.DestroyRuntimeObject(texture);
+                Debug.LogWarning(
+                    $"Could not decode the Koikatsu MaterialEditor texture " +
+                    $"for material '{materialName}', property '{propertyName}'.");
+                return null;
+            }
+
+            DilateTransparentFaceDetailBorder(
+                texture,
+                materialName,
+                propertyName);
+
+            looseTextures.Add(cacheKey, texture);
+            runtimeTextures.Add(texture);
+            return texture;
+        }
+
+        private static void DilateTransparentFaceDetailBorder(
+            Texture2D texture,
+            string materialName,
+            string propertyName)
+        {
+            if (texture == null ||
+                !IsFaceDetailMainTexture(materialName, propertyName))
+            {
+                return;
+            }
+
+            // Uploaded face PNGs often store white RGB below zero alpha.
+            // Extend visible edge colors so bilinear filtering cannot reveal it.
+            var source = texture.GetPixels32();
+            var width = texture.width;
+            var height = texture.height;
+            if (source == null || source.Length != width * height ||
+                width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            var dilated = (Color32[])source.Clone();
+            var changed = false;
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var index = y * width + x;
+                    if (source[index].a != 0)
+                    {
+                        continue;
+                    }
+
+                    uint red = 0;
+                    uint green = 0;
+                    uint blue = 0;
+                    uint weight = 0;
+                    for (var offsetY = -1; offsetY <= 1; offsetY++)
+                    {
+                        for (var offsetX = -1; offsetX <= 1; offsetX++)
+                        {
+                            if (offsetX == 0 && offsetY == 0)
+                            {
+                                continue;
+                            }
+
+                            var neighborX = (x + offsetX + width) % width;
+                            var neighborY = (y + offsetY + height) % height;
+                            var neighbor = source[neighborY * width + neighborX];
+                            if (neighbor.a == 0)
+                            {
+                                continue;
+                            }
+
+                            red += (uint)(neighbor.r * neighbor.a);
+                            green += (uint)(neighbor.g * neighbor.a);
+                            blue += (uint)(neighbor.b * neighbor.a);
+                            weight += neighbor.a;
+                        }
+                    }
+
+                    if (weight == 0)
+                    {
+                        continue;
+                    }
+
+                    dilated[index] = new Color32(
+                        (byte)(red / weight),
+                        (byte)(green / weight),
+                        (byte)(blue / weight),
+                        0);
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                texture.SetPixels32(dilated);
+                texture.Apply(false, false);
+            }
+        }
+
+        private static bool IsFaceDetailMainTexture(
+            string materialName,
+            string propertyName)
+        {
+            var property = (propertyName ?? string.Empty).TrimStart('_');
+            if (!string.Equals(
+                    property,
+                    "MainTex",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(
+                    property,
+                    "BaseMap",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var material = materialName ?? string.Empty;
+            return material.IndexOf(
+                       "mayuge",
+                       StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   material.IndexOf(
+                       "eyeline",
+                       StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   material.IndexOf(
+                       "noseline",
+                       StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static void SetMaterialTexture(
+            Material material,
+            string propertyName,
+            Texture texture)
+        {
+            var applied = false;
+            foreach (var property in ResolveMaterialProperties(
+                         material,
+                         propertyName))
+            {
+                material.SetTexture(property, texture);
+                applied = true;
+            }
+
+            if (applied)
+            {
+                SetMaterialEditorOverrideTag(material, propertyName);
+            }
+        }
+
+        internal static void SetMaterialColor(
+            Material material,
+            string propertyName,
+            Color color)
+        {
+            var applied = false;
+            foreach (var property in ResolveMaterialProperties(
+                         material,
+                         propertyName))
+            {
+                material.SetColor(property, color);
+                applied = true;
+            }
+
+            if (applied)
+            {
+                SetMaterialEditorOverrideTag(material, propertyName);
+            }
+        }
+
+        private static void SetMaterialEditorOverrideTag(
+            Material material,
+            string propertyName)
+        {
+            if (material == null || string.IsNullOrEmpty(propertyName))
+            {
+                return;
+            }
+
+            material.SetOverrideTag(
+                "BodyEditor.MaterialEditor." +
+                propertyName.TrimStart('_'),
+                "1");
+        }
+
+        private static void SetMaterialFloat(
+            Material material,
+            string propertyName,
+            float value)
+        {
+            foreach (var property in ResolveMaterialProperties(
+                         material,
+                         propertyName))
+            {
+                material.SetFloat(property, value);
+            }
+        }
+
+        private static IEnumerable<string> ResolveMaterialProperties(
+            Material material,
+            string propertyName)
+        {
+            if (material == null || string.IsNullOrEmpty(propertyName))
+            {
+                yield break;
+            }
+
+            var candidates = new[]
+            {
+                propertyName,
+                propertyName == "MainTex" ? "_BaseMap" : null,
+                propertyName == "Color" || propertyName == "_Color"
+                    ? "_BaseColor"
+                    : null,
+                propertyName == "NormalMap" ? "_NormalMap" : null,
+                propertyName == "AlphaMask" ? "_AlphaMask" : null,
+                propertyName == "ColorMask" ? "_ColorMask" : null,
+                "_" + propertyName,
+                propertyName.Length > 0
+                    ? char.ToUpperInvariant(propertyName[0]) +
+                      propertyName.Substring(1)
+                    : propertyName,
+            };
+            for (var index = 0; index < candidates.Length; index++)
+            {
+                if (!string.IsNullOrEmpty(candidates[index]) &&
+                    material.HasProperty(candidates[index]))
+                {
+                    yield return candidates[index];
+                }
+            }
+        }
+
         public KoikatsuTextureSet LoadPartTextures(
             int category,
             int slot,
@@ -833,6 +1461,59 @@ namespace BodyEditor.ReferenceModels
             return catalog.TryGet(category, slot, modGuid, out var entry)
                 ? LoadPartTextures(entry)
                 : new KoikatsuTextureSet();
+        }
+
+        public Material LoadVanillaMaterial(
+            string bundleName,
+            string assetName)
+        {
+            if (string.IsNullOrWhiteSpace(bundleName) ||
+                string.IsNullOrWhiteSpace(assetName))
+            {
+                return null;
+            }
+
+            var sources = catalog.ResolveBundleCandidates(
+                abdataRoot,
+                bundleName);
+            for (var sourceIndex = 0;
+                 sourceIndex < sources.Count;
+                 sourceIndex++)
+            {
+                var source = sources[sourceIndex];
+                if (!File.Exists(source.FilePath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (!bundles.TryGetValue(source.CacheKey, out var lease))
+                    {
+                        lease = KoikatsuAssetBundleCache.Acquire(source);
+                        bundles.Add(source.CacheKey, lease);
+                        leases.Add(lease);
+                    }
+
+                    if (!lease.Bundle.Contains(assetName))
+                    {
+                        continue;
+                    }
+
+                    var material = lease.Bundle.LoadAsset<Material>(assetName);
+                    if (material != null)
+                    {
+                        return material;
+                    }
+                }
+                catch (Exception exception) when (
+                    IsTextureCandidateFailure(exception))
+                {
+                    continue;
+                }
+            }
+
+            return null;
         }
 
         public KoikatsuTextureSet LoadPartTextures(KoikatsuListEntry entry)
@@ -933,6 +1614,11 @@ namespace BodyEditor.ReferenceModels
         {
             var textureName = entry.Get(textureKey);
             if (string.IsNullOrWhiteSpace(textureName) || textureName == "0")
+            {
+                return null;
+            }
+
+            if (IsExplicitEmptyTexture(textureName))
             {
                 return null;
             }

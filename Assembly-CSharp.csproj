@@ -1433,7 +1433,9 @@
     <ProjectReference Include="BodyEditor.Rendering.csproj" />
     <ProjectReference Include="BodyEditor.Adapter.Koikatsu.csproj" />
     <ProjectReference Include="BodyEditor.RenderScheme.DefaultAnime.csproj" />
+    <ProjectReference Include="RootMotion.csproj" />
     <ProjectReference Include="BodyEditor.Adapter.Pmx.csproj" />
+    <ProjectReference Include="RootMotionEditor.csproj" />
     <ProjectReference Include="BodyEditor.Characters.csproj" />
     <ProjectReference Include="BodyEditor.Runtime.csproj" />
     <ProjectReference Include="BodyEditor.Editor.csproj" />

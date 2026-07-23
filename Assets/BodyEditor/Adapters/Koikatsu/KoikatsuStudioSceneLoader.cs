@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
 using BodyEditor.Characters;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -92,6 +93,9 @@ namespace BodyEditor.ReferenceModels
             root.transform.SetParent(parent, false);
             var items = new List<KoikatsuStudioItemInstance>();
             var characters = new List<KoikatsuReferenceModelInstance>();
+            var characterSources =
+                new Dictionary<KoikatsuReferenceModelInstance,
+                    KoikatsuSceneObject>();
             var missing = new List<KoikatsuMissingStudioItem>();
             var objectsByKey = new Dictionary<int, GameObject>();
             try
@@ -106,6 +110,7 @@ namespace BodyEditor.ReferenceModels
                         root.transform,
                         items,
                         characters,
+                        characterSources,
                         missing,
                         objectsByKey);
                 }
@@ -114,12 +119,24 @@ namespace BodyEditor.ReferenceModels
                     .OrderBy(pair => pair.Key)
                     .Select(pair => pair.Value)
                     .ToList();
+                var nodeConstraints = KoikatsuStudioNodeConstraints.TryAttach(
+                    root,
+                    scene.SourcePath,
+                    objectsByTimelineIndex);
+                nodeConstraints?.EvaluateNow();
+                var itemPoses = root.GetComponentsInChildren<
+                    KoikatsuStudioItemPose>(true);
+                for (var index = 0; index < itemPoses.Length; index++)
+                {
+                    itemPoses[index].EvaluateNow();
+                }
 
                 return new KoikatsuStudioSceneInstance(
                     root,
                     scene,
                     items,
                     characters,
+                    characterSources,
                     missing,
                     objectsByKey,
                     objectsByTimelineIndex);
@@ -149,6 +166,8 @@ namespace BodyEditor.ReferenceModels
             Transform parent,
             ICollection<KoikatsuStudioItemInstance> items,
             ICollection<KoikatsuReferenceModelInstance> characters,
+            IDictionary<KoikatsuReferenceModelInstance, KoikatsuSceneObject>
+                characterSources,
             ICollection<KoikatsuMissingStudioItem> missing,
             IDictionary<int, GameObject> objectsByKey)
         {
@@ -183,6 +202,7 @@ namespace BodyEditor.ReferenceModels
                         modsRoot);
                     character.Root.SetActive(source.Base.Visible);
                     characters.Add(character);
+                    characterSources[character] = source;
                     childParent = character.Root.transform;
                     loadedObject = character.Root;
                 }
@@ -265,6 +285,7 @@ namespace BodyEditor.ReferenceModels
                     childParent,
                     items,
                     characters,
+                    characterSources,
                     missing,
                     objectsByKey);
             }
@@ -388,12 +409,474 @@ namespace BodyEditor.ReferenceModels
         }
     }
 
+    [DefaultExecutionOrder(29000)]
+    internal sealed class KoikatsuStudioNodeConstraints : MonoBehaviour
+    {
+        private const string PluginId = "nodesConstraints";
+        private const string DataKey = "constraints";
+        private const float Epsilon = 0.000001f;
+
+        private readonly List<ConstraintBinding> bindings =
+            new List<ConstraintBinding>();
+
+        internal static KoikatsuStudioNodeConstraints TryAttach(
+            GameObject host,
+            string scenePath,
+            IReadOnlyList<GameObject> objectsByTimelineIndex)
+        {
+            if (host == null || string.IsNullOrWhiteSpace(scenePath) ||
+                objectsByTimelineIndex == null ||
+                !KoikatsuTimelineSceneReader.TryReadPluginString(
+                    scenePath,
+                    PluginId,
+                    DataKey,
+                    out var xml))
+            {
+                return null;
+            }
+
+            var values = Parse(xml, objectsByTimelineIndex);
+            if (values.Count == 0)
+            {
+                return null;
+            }
+
+            var component = host.AddComponent<KoikatsuStudioNodeConstraints>();
+            component.bindings.AddRange(values);
+            return component;
+        }
+
+        internal void EvaluateNow()
+        {
+            for (var index = 0; index < bindings.Count; index++)
+            {
+                bindings[index].Evaluate();
+            }
+        }
+
+        private void LateUpdate()
+        {
+            EvaluateNow();
+        }
+
+        private static List<ConstraintBinding> Parse(
+            string xml,
+            IReadOnlyList<GameObject> objectsByTimelineIndex)
+        {
+            var document = new XmlDocument
+            {
+                XmlResolver = null,
+            };
+            using (var text = new StringReader(xml))
+            using (var reader = XmlReader.Create(
+                       text,
+                       new XmlReaderSettings
+                       {
+                           DtdProcessing = DtdProcessing.Prohibit,
+                           XmlResolver = null,
+                       }))
+            {
+                document.Load(reader);
+            }
+
+            var result = new List<ConstraintBinding>();
+            var root = document.DocumentElement;
+            if (root == null ||
+                !string.Equals(root.Name, "constraints", StringComparison.Ordinal))
+            {
+                return result;
+            }
+
+            for (var index = 0; index < root.ChildNodes.Count; index++)
+            {
+                var node = root.ChildNodes[index];
+                if (!string.Equals(
+                        node.Name,
+                        "constraint",
+                        StringComparison.Ordinal) ||
+                    !ReadBoolean(node, "enabled", true))
+                {
+                    continue;
+                }
+
+                var parent = ResolveTransform(
+                    objectsByTimelineIndex,
+                    ReadInt(node, "parentObjectIndex", -1),
+                    ReadString(node, "parentPath"));
+                var child = ResolveTransform(
+                    objectsByTimelineIndex,
+                    ReadInt(node, "childObjectIndex", -1),
+                    ReadString(node, "childPath"));
+                if (parent == null || child == null)
+                {
+                    continue;
+                }
+
+                result.Add(new ConstraintBinding(
+                    parent,
+                    child,
+                    ReadBoolean(node, "position", false),
+                    ReadVector3(node, "positionOffset", Vector3.zero),
+                    ReadBoolean(node, "rotation", false),
+                    ReadQuaternion(node, "rotationOffset", Quaternion.identity),
+                    ReadBoolean(node, "scale", false),
+                    ReadVector3(node, "scaleOffset", Vector3.one),
+                    ReadBoolean(node, "mirrorPosition", false),
+                    ReadBoolean(node, "mirrorRotation", false),
+                    ReadBoolean(node, "mirrorScale", false),
+                    ReadBoolean(node, "lookAt", false),
+                    ReadSingle(node, "positionChangeFactor", 1f),
+                    ReadSingle(node, "rotationChangeFactor", 1f),
+                    ReadSingle(node, "scaleChangeFactor", 1f),
+                    ReadLocks(node, "positionLocks"),
+                    ReadLocks(node, "rotationLocks"),
+                    ReadLocks(node, "scaleLocks")));
+            }
+
+            return result;
+        }
+
+        private static Transform ResolveTransform(
+            IReadOnlyList<GameObject> objects,
+            int objectIndex,
+            string path)
+        {
+            if (objectIndex < 0 || objectIndex >= objects.Count ||
+                objects[objectIndex] == null)
+            {
+                return null;
+            }
+
+            var root = objects[objectIndex].transform;
+            if (string.IsNullOrEmpty(path))
+            {
+                return root;
+            }
+
+            var result = root.Find(path);
+            if (result != null || path.IndexOf('/') >= 0)
+            {
+                return result;
+            }
+
+            var descendants = root.GetComponentsInChildren<Transform>(true);
+            for (var index = 0; index < descendants.Length; index++)
+            {
+                if (string.Equals(
+                        descendants[index].name,
+                        path,
+                        StringComparison.Ordinal))
+                {
+                    return descendants[index];
+                }
+            }
+
+            return null;
+        }
+
+        private static string ReadString(XmlNode node, string name)
+        {
+            return node.Attributes?[name]?.Value ?? string.Empty;
+        }
+
+        private static bool ReadBoolean(
+            XmlNode node,
+            string name,
+            bool fallback)
+        {
+            var value = node.Attributes?[name]?.Value;
+            try
+            {
+                return string.IsNullOrEmpty(value)
+                    ? fallback
+                    : XmlConvert.ToBoolean(value);
+            }
+            catch (FormatException)
+            {
+                return fallback;
+            }
+        }
+
+        private static int ReadInt(XmlNode node, string name, int fallback)
+        {
+            var value = node.Attributes?[name]?.Value;
+            try
+            {
+                return string.IsNullOrEmpty(value)
+                    ? fallback
+                    : XmlConvert.ToInt32(value);
+            }
+            catch (FormatException)
+            {
+                return fallback;
+            }
+        }
+
+        private static float ReadSingle(
+            XmlNode node,
+            string name,
+            float fallback)
+        {
+            var value = node.Attributes?[name]?.Value;
+            try
+            {
+                return string.IsNullOrEmpty(value)
+                    ? fallback
+                    : XmlConvert.ToSingle(value);
+            }
+            catch (FormatException)
+            {
+                return fallback;
+            }
+        }
+
+        private static Vector3 ReadVector3(
+            XmlNode node,
+            string prefix,
+            Vector3 fallback)
+        {
+            return new Vector3(
+                ReadSingle(node, prefix + "X", fallback.x),
+                ReadSingle(node, prefix + "Y", fallback.y),
+                ReadSingle(node, prefix + "Z", fallback.z));
+        }
+
+        private static Quaternion ReadQuaternion(
+            XmlNode node,
+            string prefix,
+            Quaternion fallback)
+        {
+            return new Quaternion(
+                ReadSingle(node, prefix + "X", fallback.x),
+                ReadSingle(node, prefix + "Y", fallback.y),
+                ReadSingle(node, prefix + "Z", fallback.z),
+                ReadSingle(node, prefix + "W", fallback.w));
+        }
+
+        private static AxisLocks ReadLocks(XmlNode node, string prefix)
+        {
+            return new AxisLocks(
+                ReadBoolean(node, prefix + "X", true),
+                ReadBoolean(node, prefix + "Y", true),
+                ReadBoolean(node, prefix + "Z", true));
+        }
+
+        private readonly struct AxisLocks
+        {
+            public AxisLocks(bool x, bool y, bool z)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+            }
+
+            public bool X { get; }
+            public bool Y { get; }
+            public bool Z { get; }
+        }
+
+        private sealed class ConstraintBinding
+        {
+            private readonly Transform parent;
+            private readonly Transform child;
+            private readonly bool position;
+            private readonly Vector3 positionOffset;
+            private readonly bool rotation;
+            private readonly Quaternion rotationOffset;
+            private readonly bool scale;
+            private readonly Vector3 scaleOffset;
+            private readonly bool mirrorPosition;
+            private readonly bool mirrorRotation;
+            private readonly bool mirrorScale;
+            private readonly bool lookAt;
+            private readonly float positionFactor;
+            private readonly float rotationFactor;
+            private readonly float scaleFactor;
+            private readonly AxisLocks positionLocks;
+            private readonly AxisLocks rotationLocks;
+            private readonly AxisLocks scaleLocks;
+            private readonly Vector3 originalParentPosition;
+            private readonly Quaternion originalParentRotation;
+            private readonly Vector3 originalParentScale;
+
+            public ConstraintBinding(
+                Transform parent,
+                Transform child,
+                bool position,
+                Vector3 positionOffset,
+                bool rotation,
+                Quaternion rotationOffset,
+                bool scale,
+                Vector3 scaleOffset,
+                bool mirrorPosition,
+                bool mirrorRotation,
+                bool mirrorScale,
+                bool lookAt,
+                float positionFactor,
+                float rotationFactor,
+                float scaleFactor,
+                AxisLocks positionLocks,
+                AxisLocks rotationLocks,
+                AxisLocks scaleLocks)
+            {
+                this.parent = parent;
+                this.child = child;
+                this.position = position;
+                this.positionOffset = positionOffset;
+                this.rotation = rotation;
+                this.rotationOffset = rotationOffset;
+                this.scale = scale;
+                this.scaleOffset = scaleOffset;
+                this.mirrorPosition = mirrorPosition;
+                this.mirrorRotation = mirrorRotation;
+                this.mirrorScale = mirrorScale;
+                this.lookAt = lookAt;
+                this.positionFactor = positionFactor;
+                this.rotationFactor = rotationFactor;
+                this.scaleFactor = scaleFactor;
+                this.positionLocks = positionLocks;
+                this.rotationLocks = rotationLocks;
+                this.scaleLocks = scaleLocks;
+                originalParentPosition = parent.position;
+                originalParentRotation = parent.rotation;
+                originalParentScale = parent.lossyScale;
+            }
+
+            public void Evaluate()
+            {
+                if (parent == null || child == null)
+                {
+                    return;
+                }
+
+                if (position)
+                {
+                    ApplyPosition();
+                }
+
+                if (rotation)
+                {
+                    ApplyRotation();
+                }
+
+                if (scale)
+                {
+                    ApplyScale();
+                }
+            }
+
+            private void ApplyPosition()
+            {
+                var movement = parent.position - originalParentPosition;
+                var target = mirrorPosition
+                    ? -movement * (positionFactor + 1f)
+                    : movement * (positionFactor - 1f);
+                target = parent.TransformPoint(target + positionOffset);
+                var current = child.position;
+                child.position = new Vector3(
+                    positionLocks.X ? target.x : current.x,
+                    positionLocks.Y ? target.y : current.y,
+                    positionLocks.Z ? target.z : current.z);
+            }
+
+            private void ApplyRotation()
+            {
+                Quaternion target;
+                if (lookAt)
+                {
+                    target = Quaternion.LookRotation(
+                        parent.position - child.position);
+                    if (mirrorRotation)
+                    {
+                        target = new Quaternion(
+                            -target.x,
+                            -target.y,
+                            target.z,
+                            target.w);
+                    }
+                }
+                else
+                {
+                    var change = Quaternion.Inverse(originalParentRotation) *
+                                 parent.rotation;
+                    target = originalParentRotation *
+                             (mirrorRotation
+                                 ? Quaternion.Inverse(change)
+                                 : change);
+                }
+
+                target *= rotationOffset;
+                target = Quaternion.SlerpUnclamped(
+                    Quaternion.identity,
+                    target,
+                    rotationFactor);
+                var current = child.rotation.eulerAngles;
+                var euler = target.eulerAngles;
+                child.rotation = Quaternion.Euler(
+                    rotationLocks.X ? euler.x : current.x,
+                    rotationLocks.Y ? euler.y : current.y,
+                    rotationLocks.Z ? euler.z : current.z);
+            }
+
+            private void ApplyScale()
+            {
+                var parentScale = parent.lossyScale;
+                var childParentScale = child.parent != null
+                    ? child.parent.lossyScale
+                    : Vector3.one;
+                var target = new Vector3(
+                    ScaleAxis(
+                        originalParentScale.x,
+                        parentScale.x,
+                        childParentScale.x,
+                        scaleOffset.x),
+                    ScaleAxis(
+                        originalParentScale.y,
+                        parentScale.y,
+                        childParentScale.y,
+                        scaleOffset.y),
+                    ScaleAxis(
+                        originalParentScale.z,
+                        parentScale.z,
+                        childParentScale.z,
+                        scaleOffset.z));
+                var current = child.localScale;
+                child.localScale = new Vector3(
+                    scaleLocks.X ? target.x : current.x,
+                    scaleLocks.Y ? target.y : current.y,
+                    scaleLocks.Z ? target.z : current.z);
+            }
+
+            private float ScaleAxis(
+                float original,
+                float current,
+                float childParent,
+                float offset)
+            {
+                if (Mathf.Abs(original) < Epsilon ||
+                    Mathf.Abs(childParent) < Epsilon)
+                {
+                    return offset;
+                }
+
+                var exponent = mirrorScale ? -scaleFactor : scaleFactor;
+                return original * offset / childParent *
+                       Mathf.Pow(current / original, exponent);
+            }
+        }
+    }
+
     public sealed class KoikatsuStudioSceneInstance : IDisposable
     {
         private GameObject root;
         private List<KoikatsuStudioItemInstance> items;
         private List<KoikatsuReferenceModelInstance> characters;
         private IReadOnlyList<ICharacterModel> characterModels;
+        private Dictionary<KoikatsuReferenceModelInstance,
+            KoikatsuSceneObject> characterSources;
+        private Dictionary<int, GameObject> objectsByDictionaryKey;
+        private List<GameObject> objectsByTimelineIndex;
+        private IReadOnlyList<GameObject> readOnlyObjectsByTimelineIndex;
         private KoikatsuStudioMapInstance map;
 
         internal KoikatsuStudioSceneInstance(
@@ -401,6 +884,8 @@ namespace BodyEditor.ReferenceModels
             KoikatsuScene scene,
             List<KoikatsuStudioItemInstance> items,
             List<KoikatsuReferenceModelInstance> characters,
+            Dictionary<KoikatsuReferenceModelInstance, KoikatsuSceneObject>
+                characterSources,
             List<KoikatsuMissingStudioItem> missingItems,
             Dictionary<int, GameObject> objectsByDictionaryKey,
             List<GameObject> objectsByTimelineIndex)
@@ -410,10 +895,13 @@ namespace BodyEditor.ReferenceModels
             this.characters = characters ??
                 throw new ArgumentNullException(nameof(characters));
             characterModels = characters.AsReadOnly();
+            this.characterSources = characterSources ??
+                throw new ArgumentNullException(nameof(characterSources));
             Scene = scene ?? throw new ArgumentNullException(nameof(scene));
             MissingItems = missingItems.AsReadOnly();
-            ObjectsByDictionaryKey = objectsByDictionaryKey;
-            ObjectsByTimelineIndex = objectsByTimelineIndex.AsReadOnly();
+            this.objectsByDictionaryKey = objectsByDictionaryKey;
+            this.objectsByTimelineIndex = objectsByTimelineIndex;
+            readOnlyObjectsByTimelineIndex = objectsByTimelineIndex.AsReadOnly();
         }
 
         public GameObject Root => root;
@@ -433,13 +921,110 @@ namespace BodyEditor.ReferenceModels
 
         public IReadOnlyList<KoikatsuMissingStudioItem> MissingItems { get; }
 
-        public IReadOnlyDictionary<int, GameObject> ObjectsByDictionaryKey { get; }
+        public IReadOnlyDictionary<int, GameObject> ObjectsByDictionaryKey =>
+            objectsByDictionaryKey;
 
-        public IReadOnlyList<GameObject> ObjectsByTimelineIndex { get; }
+        public IReadOnlyList<GameObject> ObjectsByTimelineIndex =>
+            readOnlyObjectsByTimelineIndex;
 
         public bool TryGetObject(int dictionaryKey, out GameObject value)
         {
             return ObjectsByDictionaryKey.TryGetValue(dictionaryKey, out value);
+        }
+
+        internal bool TryReplaceCharacter(
+            KoikatsuReferenceModelInstance character,
+            KoikatsuReferenceModelInstance replacement,
+            string abdataRoot,
+            string modsRoot)
+        {
+            if (character == null || replacement == null ||
+                replacement.SourceCard == null ||
+                !characterSources.TryGetValue(character, out var source))
+            {
+                return false;
+            }
+
+            var characterIndex = characters.IndexOf(character);
+            var oldRoot = character.Root;
+            var newRoot = replacement.Root;
+            if (characterIndex < 0 || oldRoot == null || newRoot == null)
+            {
+                return false;
+            }
+
+            var oldTransform = oldRoot.transform;
+            var newTransform = newRoot.transform;
+            newTransform.SetParent(oldTransform.parent, false);
+            newTransform.SetSiblingIndex(oldTransform.GetSiblingIndex());
+            newTransform.localPosition = oldTransform.localPosition;
+            newTransform.localRotation = oldTransform.localRotation;
+            newTransform.localScale = oldTransform.localScale;
+            newRoot.SetActive(oldRoot.activeSelf);
+
+            var previousCard = source.Character.Card;
+            source.Character.Card = replacement.SourceCard;
+            try
+            {
+                KoikatsuStudioCharacterPose.Apply(
+                    replacement,
+                    source.Character,
+                    abdataRoot,
+                    modsRoot);
+            }
+            catch
+            {
+                source.Character.Card = previousCard;
+                throw;
+            }
+
+            for (var index = 0; index < source.Children.Count; index++)
+            {
+                if (TryGetObject(
+                        source.Children[index].Base.DicKey,
+                        out var child) &&
+                    child != null && child.transform.IsChildOf(oldTransform))
+                {
+                    child.transform.SetParent(newTransform, false);
+                }
+            }
+
+            characters[characterIndex] = replacement;
+            characterSources.Remove(character);
+            characterSources[replacement] = source;
+            ReplaceObjectReferences(oldRoot, newRoot);
+            try
+            {
+                character.Dispose();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+
+            return true;
+        }
+
+        private void ReplaceObjectReferences(
+            GameObject oldRoot,
+            GameObject newRoot)
+        {
+            var keys = objectsByDictionaryKey
+                .Where(pair => ReferenceEquals(pair.Value, oldRoot))
+                .Select(pair => pair.Key)
+                .ToArray();
+            for (var index = 0; index < keys.Length; index++)
+            {
+                objectsByDictionaryKey[keys[index]] = newRoot;
+            }
+
+            for (var index = 0; index < objectsByTimelineIndex.Count; index++)
+            {
+                if (ReferenceEquals(objectsByTimelineIndex[index], oldRoot))
+                {
+                    objectsByTimelineIndex[index] = newRoot;
+                }
+            }
         }
 
         internal async Task LoadMapAsync(
@@ -499,6 +1084,7 @@ namespace BodyEditor.ReferenceModels
 
             characters.Clear();
             characterModels = Array.Empty<ICharacterModel>();
+            characterSources.Clear();
 
             for (var index = items.Count - 1; index >= 0; index--)
             {
@@ -506,6 +1092,9 @@ namespace BodyEditor.ReferenceModels
             }
 
             items.Clear();
+            objectsByDictionaryKey.Clear();
+            objectsByTimelineIndex.Clear();
+            readOnlyObjectsByTimelineIndex = Array.Empty<GameObject>();
             KoikatsuStudioItemLoader.Destroy(root);
             root = null;
         }

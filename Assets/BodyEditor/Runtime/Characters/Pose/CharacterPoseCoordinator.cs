@@ -11,6 +11,7 @@ namespace BodyEditor.Characters
         public const int Timeline = 300;
         public const int ActionEditing = 1000;
         public const int BodyConstraints = 2000;
+        public const int EyeLook = 3000;
     }
 
     public interface ICharacterPoseModifier
@@ -22,9 +23,36 @@ namespace BodyEditor.Characters
         void Evaluate(CharacterPoseBuffer pose);
     }
 
+    public interface ICharacterPosePipeline
+    {
+        event Action EvaluationStarting;
+
+        event Action<CharacterPoseBuffer> PoseEvaluated;
+
+        CharacterSkeleton Skeleton { get; }
+
+        CharacterPoseBuffer Pose { get; }
+
+        int ModifierCount { get; }
+
+        bool IsInitialized { get; }
+
+        void RegisterModifier(ICharacterPoseModifier modifier);
+
+        CharacterPoseLayer CreateLayer(
+            int order = CharacterPoseStages.ActionEditing,
+            string name = null);
+
+        void UnregisterModifier(ICharacterPoseModifier modifier);
+
+        void EvaluateNow();
+    }
+
     [DefaultExecutionOrder(30000)]
     [DisallowMultipleComponent]
-    public sealed class CharacterPoseCoordinator : MonoBehaviour
+    public sealed class CharacterPoseCoordinator :
+        MonoBehaviour,
+        ICharacterPosePipeline
     {
         private readonly List<ModifierEntry> modifiers =
             new List<ModifierEntry>();
@@ -34,6 +62,8 @@ namespace BodyEditor.Characters
         private bool evaluating;
 
         public event Action<CharacterPoseBuffer> PoseEvaluated;
+
+        public event Action EvaluationStarting;
 
         public CharacterSkeleton Skeleton => skeleton;
 
@@ -140,6 +170,7 @@ namespace BodyEditor.Characters
             evaluating = true;
             try
             {
+                EvaluationStarting?.Invoke();
                 pose.Capture();
                 for (var index = 0; index < modifiers.Count; index++)
                 {
@@ -170,7 +201,8 @@ namespace BodyEditor.Characters
 
         private void LateUpdate()
         {
-            if (modifiers.Count > 0 || PoseEvaluated != null)
+            if (modifiers.Count > 0 || EvaluationStarting != null ||
+                PoseEvaluated != null)
             {
                 EvaluateNow();
             }
@@ -182,6 +214,7 @@ namespace BodyEditor.Characters
             skeleton = null;
             pose = null;
             PoseEvaluated = null;
+            EvaluationStarting = null;
         }
 
         private static int CompareModifiers(

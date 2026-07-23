@@ -33,7 +33,30 @@ namespace BodyEditor.ReferenceModels
 
         public bool TryGetIris(string materialKey, out KoikatsuBakedEyeTexture eye)
         {
-            if (string.IsNullOrEmpty(materialKey) ||
+            return TryGetIris(null, materialKey, out eye);
+        }
+
+        public bool TryGetIris(
+            string rendererName,
+            string materialKey,
+            out KoikatsuBakedEyeTexture eye)
+        {
+            var rendererKey = (rendererName ?? string.Empty).ToLowerInvariant();
+            if (rendererKey == "cf_ohitomi_l02")
+            {
+                eye = Left;
+                return eye?.Texture != null;
+            }
+
+            if (rendererKey == "cf_ohitomi_r02")
+            {
+                eye = Right;
+                return eye?.Texture != null;
+            }
+
+            if (rendererKey == "cf_ohitomi_l" ||
+                rendererKey == "cf_ohitomi_r" ||
+                string.IsNullOrEmpty(materialKey) ||
                 materialKey.Contains("sirome"))
             {
                 eye = null;
@@ -55,6 +78,22 @@ namespace BodyEditor.ReferenceModels
             eye = null;
             return false;
         }
+
+        public bool IsWhite(string rendererName, string materialKey)
+        {
+            var rendererKey = (rendererName ?? string.Empty).ToLowerInvariant();
+            if (rendererKey == "cf_ohitomi_l02" ||
+                rendererKey == "cf_ohitomi_r02")
+            {
+                return false;
+            }
+
+            return White != null &&
+                   (rendererKey == "cf_ohitomi_l" ||
+                    rendererKey == "cf_ohitomi_r" ||
+                    !string.IsNullOrEmpty(materialKey) &&
+                    materialKey.Contains("sirome"));
+        }
     }
 
     internal static class KoikatsuEyeTextureBaker
@@ -70,6 +109,7 @@ namespace BodyEditor.ReferenceModels
         public static KoikatsuBakedEyeTextures Bake(
             KoikatsuCardFace face,
             KoikatsuTextureLoader textureLoader,
+            int coordinateIndex,
             ICollection<Texture2D> runtimeTextures)
         {
             if (face == null)
@@ -93,6 +133,16 @@ namespace BodyEditor.ReferenceModels
             {
                 throw new InvalidOperationException(
                     "The Koikatsu eye texture bake shader could not be loaded.");
+            }
+
+            var originalCreateMaterial = textureLoader.LoadVanillaMaterial(
+                "chara/mm_base.unity3d",
+                "cf_m_eye_create");
+            if (originalCreateMaterial != null &&
+                (originalCreateMaterial.shader == null ||
+                 !originalCreateMaterial.shader.isSupported))
+            {
+                originalCreateMaterial = null;
             }
 
             var appearance = face.Appearance;
@@ -123,72 +173,62 @@ namespace BodyEditor.ReferenceModels
                                   "ChaFileFace.whiteId");
             if (whiteSource != null)
             {
-                if (whiteOverride != null)
-                {
-                    result.White = whiteOverride;
-                }
-                else
-                {
-                    result.White = BakeWhite(
-                        shader,
-                        whiteSource,
-                        appearance.EyeWhiteBaseColor,
-                        appearance.EyeWhiteSubColor);
-                    runtimeTextures.Add(result.White);
-                }
+                result.White = BakeWhite(
+                    shader,
+                    whiteSource,
+                    appearance.EyeWhiteBaseColor,
+                    appearance.EyeWhiteSubColor);
+                runtimeTextures.Add(result.White);
             }
 
             var irisOverride = textureLoader
                 .LoadMaterialEditorCharacterTexture(
                     "cf_m_hitomi_00",
                     "MainTex");
-            if (irisOverride != null)
-            {
-                result.Left = CreateIrisOverride(
-                    irisOverride,
-                    appearance,
-                    false);
-                result.Right = CreateIrisOverride(
-                    irisOverride,
-                    appearance,
-                    true);
-            }
-            else
-            {
-                result.Left = BakeIris(
-                    shader,
-                    face,
-                    GetPupil(appearance.Pupils, 0),
-                    highlightUp,
-                    highlightDown,
-                    false,
+            result.Left = BakeIris(
+                shader,
+                face,
+                GetPupil(appearance.Pupils, 0),
+                highlightUp,
+                highlightDown,
+                false,
+                irisOverride,
+                LoadEyeOverlay(
                     textureLoader,
-                    runtimeTextures);
-                result.Right = BakeIris(
-                    shader,
-                    face,
-                    GetPupil(appearance.Pupils, 1),
-                    highlightUp,
-                    highlightDown,
-                    true,
+                    coordinateIndex,
+                    KoikatsuSkinOverlayType.EyeUnderLeft,
+                    KoikatsuSkinOverlayType.EyeUnder),
+                LoadEyeOverlay(
                     textureLoader,
-                    runtimeTextures);
-            }
+                    coordinateIndex,
+                    KoikatsuSkinOverlayType.EyeOverLeft,
+                    KoikatsuSkinOverlayType.EyeOver),
+                textureLoader,
+                runtimeTextures,
+                originalCreateMaterial);
+            result.Right = BakeIris(
+                shader,
+                face,
+                GetPupil(appearance.Pupils, 1),
+                highlightUp,
+                highlightDown,
+                true,
+                irisOverride,
+                LoadEyeOverlay(
+                    textureLoader,
+                    coordinateIndex,
+                    KoikatsuSkinOverlayType.EyeUnderRight,
+                    KoikatsuSkinOverlayType.EyeUnder),
+                LoadEyeOverlay(
+                    textureLoader,
+                    coordinateIndex,
+                    KoikatsuSkinOverlayType.EyeOverRight,
+                    KoikatsuSkinOverlayType.EyeOver),
+                textureLoader,
+                runtimeTextures,
+                originalCreateMaterial);
 
             return result;
-        }
-
-        private static KoikatsuBakedEyeTexture CreateIrisOverride(
-            Texture2D texture,
-            KoikatsuCardFaceAppearance appearance,
-            bool rightEye)
-        {
-            CalculateUvTransform(
-                appearance,
-                rightEye,
-                out var scale,
-                out var offset);
-            return new KoikatsuBakedEyeTexture(texture, scale, offset);
         }
 
         private static KoikatsuBakedEyeTexture BakeIris(
@@ -198,15 +238,19 @@ namespace BodyEditor.ReferenceModels
             Texture2D highlightUp,
             Texture2D highlightDown,
             bool rightEye,
+            Texture2D sourceOverride,
+            Texture2D underlay,
+            Texture2D overlay,
             KoikatsuTextureLoader textureLoader,
-            ICollection<Texture2D> runtimeTextures)
+            ICollection<Texture2D> runtimeTextures,
+            Material originalCreateMaterial)
         {
             if (pupil == null)
             {
                 return null;
             }
 
-            var source = textureLoader.LoadCatalogTexture(
+            var source = sourceOverride ?? textureLoader.LoadCatalogTexture(
                 EyeCategory,
                 pupil.Id,
                 "MainAB",
@@ -219,46 +263,47 @@ namespace BodyEditor.ReferenceModels
                 return null;
             }
 
+            source = KoikatsuOverlayTextureBaker.Composite(
+                source,
+                underlay,
+                runtimeTextures,
+                $"Koikatsu Eye {(rightEye ? "R" : "L")} (KSOX underlay)",
+                true);
+
             var gradient = textureLoader.LoadCatalogTexture(
                 EyeGradientCategory,
                 pupil.GradientMaskId,
                 "ColorMaskAB",
                 "ColorMaskTex");
-            var material = new Material(shader);
+            var material = originalCreateMaterial != null
+                ? new Material(originalCreateMaterial)
+                : new Material(shader);
             try
             {
-                material.SetTexture("_ColorMask", gradient ?? Texture2D.whiteTexture);
-                material.SetTexture(
-                    "_HighlightUp",
-                    highlightUp ?? Texture2D.whiteTexture);
-                material.SetTexture(
-                    "_HighlightDown",
-                    highlightDown ?? Texture2D.whiteTexture);
-                material.SetColor("_BaseColor", pupil.BaseColor);
-                material.SetColor("_SubColor", pupil.SubColor);
-                material.SetColor("_HighlightUpColor", face.Appearance.HighlightUpColor);
-                material.SetColor(
-                    "_HighlightDownColor",
-                    face.Appearance.HighlightDownColor);
-                material.SetFloat("_GradientBlend", pupil.GradientBlend);
-                material.SetFloat(
-                    "_GradientOffsetY",
-                    Mathf.Lerp(-0.5f, 0.5f, pupil.GradientOffsetY));
-                material.SetFloat(
-                    "_GradientScale",
-                    Mathf.Lerp(-1f, 1f, pupil.GradientScale));
-                material.SetFloat(
-                    "_HighlightUpOffsetY",
-                    Mathf.Lerp(0.1f, -0.1f, face.Appearance.HighlightUpY));
-                material.SetFloat(
-                    "_HighlightDownOffsetY",
-                    Mathf.Lerp(0.1f, -0.1f, face.Appearance.HighlightDownY));
-                material.SetFloat("_HasGradient", gradient != null ? 1f : 0f);
-                material.SetFloat("_HasHighlightUp", highlightUp != null ? 1f : 0f);
-                material.SetFloat(
-                    "_HasHighlightDown",
-                    highlightDown != null ? 1f : 0f);
-                material.SetFloat("_Rotation", GetEyeRotation(face, rightEye));
+                if (originalCreateMaterial != null)
+                {
+                    ConfigureOriginalMaterial(
+                        material,
+                        pupil,
+                        gradient,
+                        highlightUp,
+                        highlightDown,
+                        face.Appearance,
+                        rightEye,
+                        GetEyeRotation(face, rightEye));
+                }
+                else
+                {
+                    ConfigureFallbackMaterial(
+                        material,
+                        pupil,
+                        gradient,
+                        highlightUp,
+                        highlightDown,
+                        face.Appearance,
+                        rightEye,
+                        GetEyeRotation(face, rightEye));
+                }
 
                 var texture = Render(
                     material,
@@ -266,6 +311,12 @@ namespace BodyEditor.ReferenceModels
                     0,
                     $"Koikatsu Eye {(rightEye ? "R" : "L")} {pupil.Id}");
                 runtimeTextures.Add(texture);
+                texture = KoikatsuOverlayTextureBaker.Composite(
+                    texture,
+                    overlay,
+                    runtimeTextures,
+                    $"Koikatsu Eye {(rightEye ? "R" : "L")} (KSOX overlay)",
+                    true);
                 CalculateUvTransform(
                     face.Appearance,
                     rightEye,
@@ -276,6 +327,169 @@ namespace BodyEditor.ReferenceModels
             finally
             {
                 KoikatsuCharacterAssembler.DestroyRuntimeObject(material);
+            }
+        }
+
+        private static void ConfigureOriginalMaterial(
+            Material material,
+            KoikatsuCardPupil pupil,
+            Texture2D gradient,
+            Texture2D highlightUp,
+            Texture2D highlightDown,
+            KoikatsuCardFaceAppearance appearance,
+            bool rightEye,
+            float rotation)
+        {
+            SetTexture(material, "_ColorMask", gradient ?? Texture2D.whiteTexture);
+            SetColor(material, "_Color", pupil.BaseColor);
+            SetColor(material, "_Color2", pupil.SubColor);
+            SetFloat(
+                material,
+                "_Blend",
+                gradient != null ? pupil.GradientBlend : 0f);
+            SetVector(
+                material,
+                "_grad",
+                new Vector4(
+                    0f,
+                    Mathf.Lerp(-0.5f, 0.5f, pupil.GradientOffsetY),
+                    0f,
+                    Mathf.Lerp(-1f, 1f, pupil.GradientScale)));
+
+            SetTexture(
+                material,
+                "_overtex1",
+                highlightUp ?? Texture2D.blackTexture);
+            SetTexture(
+                material,
+                "_overtex2",
+                highlightDown ?? Texture2D.blackTexture);
+            SetColor(
+                material,
+                "_overcolor1",
+                highlightUp != null
+                    ? appearance.HighlightUpColor
+                    : Color.clear);
+            SetColor(
+                material,
+                "_overcolor2",
+                highlightDown != null
+                    ? appearance.HighlightDownColor
+                    : Color.clear);
+            SetTextureOffset(
+                material,
+                "_overtex1",
+                new Vector2(
+                    0f,
+                    Mathf.Lerp(0.1f, -0.1f, appearance.HighlightUpY)));
+            SetTextureOffset(
+                material,
+                "_overtex2",
+                new Vector2(
+                    0f,
+                    Mathf.Lerp(0.1f, -0.1f, appearance.HighlightDownY)));
+            SetFloat(
+                material,
+                "_rotation",
+                rotation);
+        }
+
+        private static void ConfigureFallbackMaterial(
+            Material material,
+            KoikatsuCardPupil pupil,
+            Texture2D gradient,
+            Texture2D highlightUp,
+            Texture2D highlightDown,
+            KoikatsuCardFaceAppearance appearance,
+            bool rightEye,
+            float rotation)
+        {
+            material.SetTexture("_ColorMask", gradient ?? Texture2D.whiteTexture);
+            material.SetTexture(
+                "_HighlightUp",
+                highlightUp ?? Texture2D.whiteTexture);
+            material.SetTexture(
+                "_HighlightDown",
+                highlightDown ?? Texture2D.whiteTexture);
+            material.SetColor("_BaseColor", pupil.BaseColor);
+            material.SetColor("_SubColor", pupil.SubColor);
+            material.SetColor("_HighlightUpColor", appearance.HighlightUpColor);
+            material.SetColor(
+                "_HighlightDownColor",
+                appearance.HighlightDownColor);
+            material.SetFloat("_GradientBlend", pupil.GradientBlend);
+            material.SetFloat(
+                "_GradientOffsetY",
+                Mathf.Lerp(-0.5f, 0.5f, pupil.GradientOffsetY));
+            material.SetFloat(
+                "_GradientScale",
+                Mathf.Lerp(-1f, 1f, pupil.GradientScale));
+            material.SetFloat(
+                "_HighlightUpOffsetY",
+                Mathf.Lerp(0.1f, -0.1f, appearance.HighlightUpY));
+            material.SetFloat(
+                "_HighlightDownOffsetY",
+                Mathf.Lerp(0.1f, -0.1f, appearance.HighlightDownY));
+            material.SetFloat("_HasGradient", gradient != null ? 1f : 0f);
+            material.SetFloat("_HasHighlightUp", highlightUp != null ? 1f : 0f);
+            material.SetFloat(
+                "_HasHighlightDown",
+                highlightDown != null ? 1f : 0f);
+            material.SetFloat("_Rotation", rotation);
+        }
+
+        private static void SetTexture(
+            Material material,
+            string property,
+            Texture texture)
+        {
+            if (material.HasProperty(property))
+            {
+                material.SetTexture(property, texture);
+            }
+        }
+
+        private static void SetColor(
+            Material material,
+            string property,
+            Color color)
+        {
+            if (material.HasProperty(property))
+            {
+                material.SetColor(property, color);
+            }
+        }
+
+        private static void SetFloat(
+            Material material,
+            string property,
+            float value)
+        {
+            if (material.HasProperty(property))
+            {
+                material.SetFloat(property, value);
+            }
+        }
+
+        private static void SetVector(
+            Material material,
+            string property,
+            Vector4 value)
+        {
+            if (material.HasProperty(property))
+            {
+                material.SetVector(property, value);
+            }
+        }
+
+        private static void SetTextureOffset(
+            Material material,
+            string property,
+            Vector2 offset)
+        {
+            if (material.HasProperty(property))
+            {
+                material.SetTextureOffset(property, offset);
             }
         }
 
@@ -313,9 +527,14 @@ namespace BodyEditor.ReferenceModels
                 RenderTextureFormat.ARGB32,
                 RenderTextureReadWrite.Default);
             var previous = RenderTexture.active;
+            var previousSrgbWrite = GL.sRGBWrite;
             Texture2D texture = null;
             try
             {
+                GL.sRGBWrite = true;
+                RenderTexture.active = target;
+                GL.Clear(false, true, Color.clear);
+                RenderTexture.active = previous;
                 Graphics.Blit(source, target, material, pass);
                 RenderTexture.active = target;
                 texture = new Texture2D(
@@ -340,6 +559,7 @@ namespace BodyEditor.ReferenceModels
             }
             finally
             {
+                GL.sRGBWrite = previousSrgbWrite;
                 RenderTexture.active = previous;
                 RenderTexture.ReleaseTemporary(target);
             }
@@ -373,6 +593,20 @@ namespace BodyEditor.ReferenceModels
             return rightEye ? -value : value;
         }
 
+        private static Texture2D LoadEyeOverlay(
+            KoikatsuTextureLoader textureLoader,
+            int coordinateIndex,
+            KoikatsuSkinOverlayType specificType,
+            KoikatsuSkinOverlayType genericType)
+        {
+            return textureLoader.LoadSkinOverlayTexture(
+                       coordinateIndex,
+                       specificType) ??
+                   textureLoader.LoadSkinOverlayTexture(
+                       coordinateIndex,
+                       genericType);
+        }
+
         private static void CalculateUvTransform(
             KoikatsuCardFaceAppearance appearance,
             bool rightEye,
@@ -392,15 +626,14 @@ namespace BodyEditor.ReferenceModels
                 eyeOffset.x *= -1f;
             }
 
+            if (eyeOffset.sqrMagnitude > 1f)
+            {
+                eyeOffset.Normalize();
+            }
+
             var motion = new Vector2(
-                Mathf.Clamp(
-                    eyeOffset.x * 0.1f * Mathf.Lerp(1f, 5f, customScale.x),
-                    -0.1f,
-                    0.1f),
-                Mathf.Clamp(
-                    eyeOffset.y * 0.1f * Mathf.Lerp(1f, 5f, customScale.y),
-                    -0.08f,
-                    0.08f));
+                eyeOffset.x * 0.1f * Mathf.Lerp(1f, 5f, customScale.x),
+                -eyeOffset.y * 0.1f * Mathf.Lerp(1f, 5f, customScale.y));
             offset = motion - customScale * 0.5f;
         }
     }

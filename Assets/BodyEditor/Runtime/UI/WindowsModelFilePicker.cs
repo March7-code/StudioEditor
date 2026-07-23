@@ -85,6 +85,48 @@ namespace BodyEditor.UI
 #endif
         }
 
+        public static bool TryPickDirectory(
+            out string directoryPath,
+            out string error,
+            string dialogTitle = "Select Directory",
+            string initialDirectory = null)
+        {
+            directoryPath = string.Empty;
+            error = string.Empty;
+
+#if UNITY_EDITOR
+            try
+            {
+                var startDirectory = Directory.Exists(initialDirectory)
+                    ? initialDirectory
+                    : Directory.Exists(lastDirectory)
+                        ? lastDirectory
+                        : string.Empty;
+                directoryPath = UnityEditor.EditorUtility.OpenFolderPanel(
+                    dialogTitle,
+                    startDirectory,
+                    string.Empty);
+                if (string.IsNullOrWhiteSpace(directoryPath))
+                {
+                    directoryPath = string.Empty;
+                    return false;
+                }
+
+                directoryPath = Path.GetFullPath(directoryPath);
+                lastDirectory = directoryPath;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = exception.Message;
+                return false;
+            }
+#else
+            error = "The directory picker is available in the Unity Editor only.";
+            return false;
+#endif
+        }
+
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
         private const int FileMustExist = 0x00001000;
         private const int PathMustExist = 0x00000800;

@@ -35,7 +35,7 @@ namespace BodyEditor.UI
             document.panelSettings = panelSettings;
             document.sortingOrder = 100f;
 
-            var controller = root.AddComponent<ReferenceModelImportController>();
+            var controller = root.AddComponent<SceneContentController>();
             var adapters = ReferenceModelAdapterRegistry.CreateAdapters();
             for (var index = 0; index < adapters.Count; index++)
             {
@@ -45,6 +45,8 @@ namespace BodyEditor.UI
             root.AddComponent<LegacyCharacterModelBridge>();
             root.AddComponent<CharacterControlPointController>();
             root.AddComponent<CharacterBodyConstraintController>();
+            root.AddComponent<TimelineCaptureController>();
+            root.AddComponent<SceneTimelineController>();
 
             var lifetime = root.AddComponent<BodyEditorRuntimeLifetime>();
             lifetime.PanelSettings = panelSettings;

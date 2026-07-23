@@ -38,6 +38,26 @@ namespace BodyEditor.ReferenceModels
             string path,
             out KoikatsuTimelineScene scene)
         {
+            if (!TryReadPluginString(
+                    path,
+                    TimelinePluginId,
+                    TimelineDataKey,
+                    out var xml))
+            {
+                scene = null;
+                return false;
+            }
+
+            scene = ParseXml(xml);
+            return true;
+        }
+
+        internal static bool TryReadPluginString(
+            string path,
+            string pluginId,
+            string dataKey,
+            out string value)
+        {
             if (!File.Exists(path))
             {
                 throw new FileNotFoundException(
@@ -48,7 +68,7 @@ namespace BodyEditor.ReferenceModels
             var fileData = File.ReadAllBytes(path);
             if (!TryReadExtendedPayload(fileData, out var payload))
             {
-                scene = null;
+                value = null;
                 return false;
             }
 
@@ -66,21 +86,19 @@ namespace BodyEditor.ReferenceModels
                     exception);
             }
 
-            if (plugins == null ||
-                !plugins.TryGetValue(TimelinePluginId, out var timeline) ||
-                timeline?.Data == null ||
-                !timeline.Data.TryGetValue(
-                    TimelineDataKey,
-                    out var sceneInfo) ||
-                !(sceneInfo is string xml) ||
-                string.IsNullOrWhiteSpace(xml))
+            if (plugins != null &&
+                plugins.TryGetValue(pluginId, out var plugin) &&
+                plugin?.Data != null &&
+                plugin.Data.TryGetValue(dataKey, out var data) &&
+                data is string text &&
+                !string.IsNullOrWhiteSpace(text))
             {
-                scene = null;
-                return false;
+                value = text;
+                return true;
             }
 
-            scene = ParseXml(xml);
-            return true;
+            value = null;
+            return false;
         }
 
         public static KoikatsuTimelineScene ParseXml(string xml)
@@ -533,6 +551,29 @@ namespace BodyEditor.ReferenceModels
                 return true;
             }
             catch (FormatException)
+            {
+                return false;
+            }
+        }
+
+        public bool TryGetInt(string name, out int value)
+        {
+            value = default;
+            if (name == null || !Attributes.TryGetValue(name, out var text))
+            {
+                return false;
+            }
+
+            try
+            {
+                value = XmlConvert.ToInt32(text);
+                return true;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+            catch (OverflowException)
             {
                 return false;
             }

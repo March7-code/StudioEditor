@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using BodyEditor.Editing;
 using BodyEditor.ReferenceModels;
+using BodyEditor.Settings;
 using BodyEditor.Viewport;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -10,43 +11,35 @@ using UnityEngine.UIElements;
 namespace BodyEditor.UI
 {
     [RequireComponent(typeof(UIDocument))]
-    [RequireComponent(typeof(ReferenceModelImportController))]
+    [RequireComponent(typeof(SceneContentController))]
     [RequireComponent(typeof(ReferenceModelPresentationController))]
+    [RequireComponent(typeof(TimelineCaptureController))]
+    [RequireComponent(typeof(SceneTimelineController))]
     public sealed class BodyEditorTopBar : MonoBehaviour
     {
-        private const string StatusReadyClass = "topbar__status--ready";
-        private const string StatusLoadingClass = "topbar__status--loading";
-        private const string StatusErrorClass = "topbar__status--error";
-        private const string TopologyModeSelectedClass =
-            "topbar__topology-mode--selected";
-
-        private ReferenceModelImportController controller;
-        private ReferenceModelPresentationController presentation;
+        private SceneContentController controller;
+        private TimelineCaptureController captureController;
+        private SceneTimelineController sceneTimeline;
         private EditableSkeletonController editableSkeleton;
-        private CharacterControlPointController characterControls;
         private BodyEditorViewport viewport;
         private BodyEditorViewportInputController inputController;
+        private PanelSettings panelSettings;
         private bool skeletonPointerActive;
-        private bool controlPointPointerActive;
+        private bool addMenuOpen;
         private VisualElement uiRoot;
         private VisualElement viewportInput;
+        private Button addButton;
+        private VisualElement addMenu;
         private Button importButton;
         private Button sceneImportButton;
-        private Button topologyEdgesButton;
-        private Button topologyRingsButton;
-        private Button topologyBothButton;
-        private IntegerField sectionRingCountField;
-        private Toggle topologyToggle;
-        private Toggle physicsToggle;
-        private Label modelLabel;
-        private Label statusLabel;
 
         private void OnEnable()
         {
-            controller = GetComponent<ReferenceModelImportController>();
-            presentation = GetComponent<ReferenceModelPresentationController>();
+            controller = GetComponent<SceneContentController>();
+            captureController = GetComponent<TimelineCaptureController>();
+            sceneTimeline = GetComponent<SceneTimelineController>();
             editableSkeleton = GetComponent<EditableSkeletonController>();
-            characterControls = GetComponent<CharacterControlPointController>();
+
             viewport = GetComponent<BodyEditorViewport>();
             if (viewport != null)
             {
@@ -55,22 +48,22 @@ namespace BodyEditor.UI
                     viewport.Controls);
             }
 
+            var document = GetComponent<UIDocument>();
+            panelSettings = document.panelSettings;
+            ApplyUiScale();
+            BodyEditorSettings.Changed += ApplyUiScale;
             controller.StateChanged += RefreshState;
-            presentation.StateChanged += RefreshTopologyState;
-            BuildUi(GetComponent<UIDocument>().rootVisualElement);
+            BuildUi(document.rootVisualElement);
             RefreshState();
         }
 
         private void OnDisable()
         {
+            BodyEditorSettings.Changed -= ApplyUiScale;
+            panelSettings = null;
             if (controller != null)
             {
                 controller.StateChanged -= RefreshState;
-            }
-
-            if (presentation != null)
-            {
-                presentation.StateChanged -= RefreshTopologyState;
             }
 
             if (importButton != null)
@@ -83,21 +76,9 @@ namespace BodyEditor.UI
                 sceneImportButton.clicked -= PickAndImportScene;
             }
 
-            if (physicsToggle != null)
+            if (addButton != null)
             {
-                physicsToggle.UnregisterValueChangedCallback(HandlePhysicsChanged);
-            }
-
-            if (topologyToggle != null)
-            {
-                topologyToggle.UnregisterValueChangedCallback(
-                    HandleTopologyChanged);
-            }
-
-            if (sectionRingCountField != null)
-            {
-                sectionRingCountField.UnregisterValueChangedCallback(
-                    HandleSectionRingCountChanged);
+                addButton.clicked -= ToggleAddMenu;
             }
 
             UnregisterViewportInput();
@@ -110,10 +91,16 @@ namespace BodyEditor.UI
             }
 
             editableSkeleton?.EndPointerDrag();
-            characterControls?.EndPointerDrag();
             skeletonPointerActive = false;
-            controlPointPointerActive = false;
             inputController = null;
+        }
+
+        private void ApplyUiScale()
+        {
+            if (panelSettings != null)
+            {
+                panelSettings.scale = BodyEditorSettings.UiScale;
+            }
         }
 
         private void BuildUi(VisualElement root)
@@ -125,6 +112,8 @@ namespace BodyEditor.UI
                 HandleKeyDown,
                 TrickleDown.TrickleDown);
             root.AddToClassList("body-editor-ui");
+            root.RemoveFromClassList(
+                "body-editor-ui--sidebar-collapsed");
             root.pickingMode = PickingMode.Ignore;
 
             viewportInput = new VisualElement
@@ -141,170 +130,108 @@ namespace BodyEditor.UI
             viewportInput.RegisterCallback<WheelEvent>(HandleWheel);
             root.Add(viewportInput);
 
-            var topBar = new VisualElement
+            var workspaceTools = new VisualElement
             {
-                name = "body-editor-topbar",
+                name = "body-editor-workspace-tools",
+                pickingMode = PickingMode.Ignore,
+            };
+            workspaceTools.AddToClassList("workspace-tools");
+            root.Add(workspaceTools);
+
+            addButton = new Button
+            {
+                text = "+",
+                tooltip = "Add to scene",
                 pickingMode = PickingMode.Position,
             };
-            topBar.AddToClassList("topbar");
+            addButton.AddToClassList("workspace-add");
+            addButton.AddToClassList("workspace-tools__button");
+            addButton.clicked += ToggleAddMenu;
+            workspaceTools.Add(addButton);
 
-            var brand = new Label("Body Editor");
-            brand.AddToClassList("topbar__brand");
-            topBar.Add(brand);
-
-            var divider = new VisualElement();
-            divider.AddToClassList("topbar__divider");
-            topBar.Add(divider);
+            addMenu = new VisualElement
+            {
+                name = "body-editor-add-menu",
+                pickingMode = PickingMode.Position,
+            };
+            addMenu.AddToClassList("add-menu");
+            addMenu.style.display = DisplayStyle.None;
 
             importButton = new Button
             {
-                text = "Import Model",
-                tooltip = "Import a model from disk",
+                text = "Character",
+                tooltip = "Import a character from disk",
             };
-            importButton.AddToClassList("topbar__import");
+            importButton.AddToClassList("add-menu__item");
             importButton.clicked += PickAndImport;
-            topBar.Add(importButton);
+            addMenu.Add(importButton);
 
             sceneImportButton = new Button
             {
-                text = "Import Scene",
+                text = "Scene",
                 tooltip = "Import a Koikatsu Studio scene card",
             };
-            sceneImportButton.AddToClassList("topbar__scene-import");
+            sceneImportButton.AddToClassList("add-menu__item");
             sceneImportButton.clicked += PickAndImportScene;
-            topBar.Add(sceneImportButton);
-
-            modelLabel = new Label("No model");
-            modelLabel.AddToClassList("topbar__model");
-            topBar.Add(modelLabel);
-
-            topologyToggle = new Toggle("Topology")
-            {
-                tooltip = "Show only the imported reference mesh topology",
-            };
-            topologyToggle.AddToClassList("topbar__topology");
-            topologyToggle.RegisterValueChangedCallback(HandleTopologyChanged);
-            topBar.Add(topologyToggle);
-
-            var topologyModes = new VisualElement
-            {
-                tooltip = "Choose triangle edges, source-vertex rings, or both",
-            };
-            topologyModes.AddToClassList("topbar__topology-modes");
-            topologyEdgesButton = CreateTopologyModeButton(
-                "Edges",
-                ReferenceTopologyDisplayMode.Edges,
-                "Show the imported triangle topology");
-            topologyEdgesButton.AddToClassList(
-                "topbar__topology-mode--first");
-            topologyRingsButton = CreateTopologyModeButton(
-                "Rings",
-                ReferenceTopologyDisplayMode.Rings,
-                "Orange source observations with the green recovered section field");
-            topologyBothButton = CreateTopologyModeButton(
-                "Both",
-                ReferenceTopologyDisplayMode.Both,
-                "Show triangle topology and captured source-vertex rings");
-            topologyBothButton.AddToClassList(
-                "topbar__topology-mode--last");
-            topologyModes.Add(topologyEdgesButton);
-            topologyModes.Add(topologyRingsButton);
-            topologyModes.Add(topologyBothButton);
-            topBar.Add(topologyModes);
-
-            sectionRingCountField = new IntegerField("Count")
-            {
-                tooltip = "Source-vertex ring samples per semantic segment (1-100)",
-                isDelayed = true,
-            };
-            sectionRingCountField.AddToClassList("topbar__ring-count");
-            sectionRingCountField.RegisterValueChangedCallback(
-                HandleSectionRingCountChanged);
-            topBar.Add(sectionRingCountField);
-
-            physicsToggle = new Toggle("Physics")
-            {
-                tooltip = "Enable model physics",
-            };
-            physicsToggle.AddToClassList("topbar__physics");
-            physicsToggle.RegisterValueChangedCallback(HandlePhysicsChanged);
-            topBar.Add(physicsToggle);
-
-            statusLabel = new Label("Ready");
-            statusLabel.AddToClassList("topbar__status");
-            topBar.Add(statusLabel);
-
-            root.Add(topBar);
+            addMenu.Add(sceneImportButton);
+            workspaceTools.Add(addMenu);
 
             if (viewport != null)
             {
                 root.Add(new ViewportAxisGizmo(viewport));
             }
 
-            root.Add(new ReferenceTimelinePanel(controller, viewportInput));
+            var animationPanel = new CharacterAnimationPanel(
+                controller,
+                workspaceTools);
+            root.Add(animationPanel);
+
+            var timelinePanel = new ReferenceTimelinePanel(
+                controller,
+                captureController,
+                sceneTimeline,
+                editableSkeleton,
+                viewportInput,
+                workspaceTools);
+            root.Add(timelinePanel);
+
+            root.Add(new EditorSettingsPanel(controller, workspaceTools));
 
             root.Add(new BodyEditorSidebar(
-                editableSkeleton,
                 controller,
-                presentation));
+                collapsed => uiRoot?.EnableInClassList(
+                    "body-editor-ui--sidebar-collapsed",
+                    collapsed),
+                camera => viewport?.ActivateReferenceCamera(camera),
+                animationPanel.SetSelectedSceneNode));
+            workspaceTools.BringToFront();
+            addMenu.BringToFront();
             uiRoot.Focus();
         }
 
-        private void HandlePhysicsChanged(ChangeEvent<bool> changeEvent)
+        private void ToggleAddMenu()
         {
-            if (controller.Current is IReferenceModelPhysicsController physics &&
-                physics.SupportsPhysics &&
-                !presentation.TopologyMode)
+            SetAddMenuVisible(!addMenuOpen);
+        }
+
+        private void SetAddMenuVisible(bool visible)
+        {
+            if (addMenu == null)
             {
-                physics.SetPhysicsEnabled(changeEvent.newValue);
+                return;
             }
 
-            RefreshPhysicsState();
-        }
-
-        private void HandleTopologyChanged(ChangeEvent<bool> changeEvent)
-        {
-            presentation.SetTopologyMode(changeEvent.newValue);
-            RefreshTopologyState();
-            RefreshPhysicsState();
-        }
-
-        private Button CreateTopologyModeButton(
-            string text,
-            ReferenceTopologyDisplayMode mode,
-            string tooltip)
-        {
-            var button = new Button(() =>
-                presentation.SetTopologyDisplayMode(mode))
-            {
-                text = text,
-                tooltip = tooltip,
-            };
-            button.AddToClassList("topbar__topology-mode");
-            return button;
-        }
-
-        private void HandleSectionRingCountChanged(ChangeEvent<int> changeEvent)
-        {
-            presentation.SetSectionRingCount(changeEvent.newValue);
-            sectionRingCountField.SetValueWithoutNotify(
-                presentation.SectionRingCount);
+            addMenuOpen = visible;
+            addMenu.style.display = addMenuOpen
+                ? DisplayStyle.Flex
+                : DisplayStyle.None;
+            addButton?.EnableInClassList("workspace-add--open", addMenuOpen);
         }
 
         private void HandleKeyDown(KeyDownEvent keyEvent)
         {
-            if (!skeletonPointerActive && !controlPointPointerActive &&
-                (keyEvent.keyCode == KeyCode.Delete ||
-                 keyEvent.keyCode == KeyCode.Backspace) &&
-                characterControls?.ClearSelectedControlPoint() == true)
-            {
-                keyEvent.StopImmediatePropagation();
-                return;
-            }
-
             if (editableSkeleton == null ||
                 skeletonPointerActive ||
-                controlPointPointerActive ||
                 (!keyEvent.ctrlKey && !keyEvent.commandKey))
             {
                 return;
@@ -339,19 +266,6 @@ namespace BodyEditor.UI
         private void HandlePointerDown(PointerDownEvent pointerEvent)
         {
             viewportInput.Focus();
-            if (characterControls != null &&
-                pointerEvent.button == (int)ViewportPointerButton.Left &&
-                TryCreatePointerRay(pointerEvent.position, out var controlRay) &&
-                characterControls.BeginPointerDrag(
-                    controlRay,
-                    viewport.ViewRotation * Vector3.forward))
-            {
-                controlPointPointerActive = true;
-                viewportInput.CapturePointer(pointerEvent.pointerId);
-                pointerEvent.StopPropagation();
-                return;
-            }
-
             if (editableSkeleton != null &&
                 pointerEvent.button == (int)ViewportPointerButton.Left &&
                 TryCreatePointerRay(pointerEvent.position, out var ray) &&
@@ -379,18 +293,6 @@ namespace BodyEditor.UI
 
         private void HandlePointerMove(PointerMoveEvent pointerEvent)
         {
-            if (controlPointPointerActive &&
-                viewportInput.HasPointerCapture(pointerEvent.pointerId))
-            {
-                if (TryCreatePointerRay(pointerEvent.position, out var controlRay))
-                {
-                    characterControls?.UpdatePointerDrag(controlRay);
-                }
-
-                pointerEvent.StopPropagation();
-                return;
-            }
-
             if (skeletonPointerActive &&
                 viewportInput.HasPointerCapture(pointerEvent.pointerId))
             {
@@ -444,12 +346,6 @@ namespace BodyEditor.UI
 
         private void ReleasePointer(int pointerId)
         {
-            if (controlPointPointerActive)
-            {
-                characterControls?.EndPointerDrag();
-                controlPointPointerActive = false;
-            }
-
             if (skeletonPointerActive)
             {
                 editableSkeleton?.EndPointerDrag();
@@ -502,6 +398,7 @@ namespace BodyEditor.UI
 
         private async void PickAndImport()
         {
+            SetAddMenuVisible(false);
             var extensions = CollectExtensions();
             if (!WindowsModelFilePicker.TryPick(
                     extensions,
@@ -510,19 +407,20 @@ namespace BodyEditor.UI
             {
                 if (!string.IsNullOrEmpty(pickerError))
                 {
-                    SetStatus("File dialog failed", StatusErrorClass, pickerError);
+                    SetAddTooltip(pickerError);
                     Debug.LogError($"[Body Editor] {pickerError}", this);
                 }
 
                 return;
             }
 
-            modelLabel.text = Path.GetFileName(filePath);
+            SetAddTooltip($"Importing {Path.GetFileName(filePath)}");
             await controller.ImportAsync(filePath);
         }
 
         private async void PickAndImportScene()
         {
+            SetAddMenuVisible(false);
             var extensions = CollectExtensions(true);
             if (!WindowsModelFilePicker.TryPick(
                     extensions,
@@ -533,14 +431,14 @@ namespace BodyEditor.UI
             {
                 if (!string.IsNullOrEmpty(pickerError))
                 {
-                    SetStatus("File dialog failed", StatusErrorClass, pickerError);
+                    SetAddTooltip(pickerError);
                     Debug.LogError($"[Body Editor] {pickerError}", this);
                 }
 
                 return;
             }
 
-            modelLabel.text = Path.GetFileName(filePath);
+            SetAddTooltip($"Importing {Path.GetFileName(filePath)}");
             await controller.ImportSceneAsync(filePath);
         }
 
@@ -582,113 +480,42 @@ namespace BodyEditor.UI
 
             importButton.SetEnabled(
                 controller.Status != ReferenceModelImportStatus.Loading);
+            addButton?.SetEnabled(
+                controller.Status != ReferenceModelImportStatus.Loading);
             sceneImportButton?.SetEnabled(
                 controller.Status != ReferenceModelImportStatus.Loading &&
                 CollectExtensions(true).Count > 0);
-            RefreshPhysicsState();
-            RefreshTopologyState();
-
+            if (controller.Status == ReferenceModelImportStatus.Loading)
+            {
+                SetAddMenuVisible(false);
+            }
             switch (controller.Status)
             {
                 case ReferenceModelImportStatus.Loading:
-                    SetStatus("Loading...", StatusLoadingClass);
+                    SetAddTooltip("Loading...");
                     break;
                 case ReferenceModelImportStatus.Ready:
-                    modelLabel.text = controller.Current?.DisplayName ?? "Model";
-                    SetStatus("Ready", StatusReadyClass);
+                    SetAddTooltip("Add to scene");
                     break;
                 case ReferenceModelImportStatus.Failed:
-                    SetStatus("Import failed", StatusErrorClass, controller.Error);
+                    SetAddTooltip(controller.Error);
                     break;
                 default:
-                    modelLabel.text = "No model";
-                    SetStatus("Ready");
+                    SetAddTooltip("Add to scene");
                     break;
             }
         }
 
-        private void RefreshPhysicsState()
+        private void SetAddTooltip(string tooltip)
         {
-            if (physicsToggle == null)
+            if (addButton == null)
             {
                 return;
             }
 
-            var physics = controller.Current as IReferenceModelPhysicsController;
-            var supported = physics?.SupportsPhysics == true;
-            physicsToggle.SetEnabled(supported &&
-                                     !presentation.TopologyMode &&
-                                     controller.Status != ReferenceModelImportStatus.Loading);
-            physicsToggle.SetValueWithoutNotify(supported && physics.PhysicsEnabled);
-        }
-
-        private void RefreshTopologyState()
-        {
-            if (topologyToggle == null)
-            {
-                return;
-            }
-
-            var supported = presentation.SupportsTopologyMode &&
-                            controller.Status != ReferenceModelImportStatus.Loading;
-            topologyToggle.SetEnabled(supported);
-            topologyToggle.SetValueWithoutNotify(
-                supported && presentation.TopologyMode);
-            var topologyActive = supported && presentation.TopologyMode;
-            SetTopologyModeButtonState(
-                topologyEdgesButton,
-                ReferenceTopologyDisplayMode.Edges,
-                topologyActive);
-            SetTopologyModeButtonState(
-                topologyRingsButton,
-                ReferenceTopologyDisplayMode.Rings,
-                topologyActive && presentation.SupportsSectionRings);
-            SetTopologyModeButtonState(
-                topologyBothButton,
-                ReferenceTopologyDisplayMode.Both,
-                topologyActive && presentation.SupportsSectionRings);
-            if (sectionRingCountField != null)
-            {
-                sectionRingCountField.SetEnabled(
-                    topologyActive && presentation.SupportsSectionRings);
-                sectionRingCountField.SetValueWithoutNotify(
-                    presentation.SectionRingCount);
-            }
-            editableSkeleton?.SetVisible(!presentation.TopologyMode);
-        }
-
-        private void SetTopologyModeButtonState(
-            Button button,
-            ReferenceTopologyDisplayMode mode,
-            bool enabled)
-        {
-            if (button == null)
-            {
-                return;
-            }
-
-            button.SetEnabled(enabled);
-            button.EnableInClassList(
-                TopologyModeSelectedClass,
-                presentation.TopologyDisplayMode == mode);
-        }
-
-        private void SetStatus(
-            string text,
-            string modifierClass = null,
-            string tooltip = null)
-        {
-            statusLabel.RemoveFromClassList(StatusReadyClass);
-            statusLabel.RemoveFromClassList(StatusLoadingClass);
-            statusLabel.RemoveFromClassList(StatusErrorClass);
-
-            if (!string.IsNullOrEmpty(modifierClass))
-            {
-                statusLabel.AddToClassList(modifierClass);
-            }
-
-            statusLabel.text = text;
-            statusLabel.tooltip = tooltip ?? string.Empty;
+            addButton.tooltip = string.IsNullOrWhiteSpace(tooltip)
+                ? "Add to scene"
+                : tooltip;
         }
     }
 }

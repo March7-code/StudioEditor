@@ -55,6 +55,7 @@
   <ItemGroup>
     <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorSidebar.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\BodyEditorViewport.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\UI\TimelineCaptureController.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\BodySectionField.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Editing\EditableSkeletonController.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelPresentation.cs" />
@@ -65,14 +66,18 @@
     <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeleton.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\AssemblyInfo.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\ViewportAxisGizmo.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Settings\BodyEditorSettings.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\HumanoidSkeletonFactory.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\UI\SceneTimelineController.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\UI\CharacterAnimationPanel.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\BodySkeletonSidebar.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\UI\EditorSettingsPanel.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelOverlays.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceMeshTopology.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\WindowsModelFilePicker.cs" />
-    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelImport.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\ReferenceModelSidebar.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Legacy\Characters\LegacyCharacterModelBridge.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\SceneContentController.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\UI\BodyEditorTopBar.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceModelAdapterRegistry.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\ReferenceModels\ReferenceSectionRings.cs" />
@@ -1270,6 +1275,10 @@
     </Reference>
     <Reference Include="System.Text.Json">
       <HintPath>F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\ref\System.Text.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>Library\ScriptAssemblies\Unity.InputSystem.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEditor.UI">

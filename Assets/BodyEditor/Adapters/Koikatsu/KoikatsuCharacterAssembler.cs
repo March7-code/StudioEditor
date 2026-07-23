@@ -208,9 +208,15 @@ namespace BodyEditor.ReferenceModels
 
                 var headBundle = AcquireAssetBundle(
                     headBundleSources,
-                    headAssetName);
+                    headAssetName,
+                    out var loadedHeadSource);
                 leases.Add(headBundle);
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // The legacy cf_m_face_create shader is a Built-in Render
+                // Pipeline material. Its UV/color interpretation is not
+                // portable to URP, so do not execute it directly here.
+                Material faceCreateMaterial = null;
 
                 container = new GameObject(displayName);
                 container.transform.SetParent(parent, false);
@@ -233,7 +239,7 @@ namespace BodyEditor.ReferenceModels
                     "p_cf_head_bone",
                     headParent);
                 headSkeleton.name = "p_cf_head_bone";
-                FindRequired(
+                var faceRoot = FindRequired(
                     headSkeleton.transform,
                     "cf_J_N_FaceRoot");
                 var headBones = BuildNameMap(headSkeleton.transform);
@@ -279,6 +285,20 @@ namespace BodyEditor.ReferenceModels
                         bodySkeleton.transform,
                         headSkeleton.transform);
 
+                    var textureLoader = new KoikatsuTextureLoader(
+                        abdataRoot,
+                        catalog,
+                        leases,
+                        card,
+                        runtimeTextures);
+                    KoikatsuMaterialConverter.ApplyMaterialEditorMainTextures(
+                        bodyModel,
+                        textureLoader,
+                        4);
+                    KoikatsuMaterialConverter.ApplyMaterialEditorMainTextures(
+                        headModel,
+                        textureLoader,
+                        4);
                     LoadHair(
                         card,
                         abdataRoot,
@@ -286,14 +306,9 @@ namespace BodyEditor.ReferenceModels
                         headSkeleton.transform,
                         leases,
                         runtimeMaterials,
+                        textureLoader,
+                        coordinateIndex,
                         cancellationToken);
-
-                    var textureLoader = new KoikatsuTextureLoader(
-                        abdataRoot,
-                        catalog,
-                        leases,
-                        card,
-                        runtimeTextures);
                     var clothesLoadResult = default(KoikatsuClothesLoadResult);
                     try
                     {
@@ -331,6 +346,7 @@ namespace BodyEditor.ReferenceModels
                             sharedRootBone,
                             leases,
                             runtimeMaterials,
+                            textureLoader,
                             coordinateIndex,
                             cancellationToken);
                     }
@@ -344,10 +360,24 @@ namespace BodyEditor.ReferenceModels
 
                     var bodyTexture = baseBundle.Bundle.LoadAsset<Texture2D>(
                         female ? "cf_body_00_t" : "cm_body_00_t");
+                    bodyTexture = KoikatsuOverlayTextureBaker.Composite(
+                        bodyTexture,
+                        textureLoader.LoadSkinOverlayTexture(
+                            coordinateIndex,
+                            KoikatsuSkinOverlayType.BodyUnder),
+                        runtimeTextures,
+                        "Koikatsu Body (KSOX underlay)");
                     bodyTexture = KoikatsuBodyMaskBaker.Bake(
                         bodyTexture,
                         clothesLoadResult.BodyAlphaMask,
                         runtimeTextures);
+                    bodyTexture = KoikatsuOverlayTextureBaker.Composite(
+                        bodyTexture,
+                        textureLoader.LoadSkinOverlayTexture(
+                            coordinateIndex,
+                            KoikatsuSkinOverlayType.BodyOver),
+                        runtimeTextures,
+                        "Koikatsu Body (KSOX overlay)");
                     if (!female)
                     {
                         ApplyCoveredMaleBodyState(
@@ -355,12 +385,37 @@ namespace BodyEditor.ReferenceModels
                             clothesLoadResult.CoversGroin);
                     }
 
-                    var faceTexture = textureLoader
-                        .LoadPartTextures(headEntry)
-                        .Main;
+                    var headTextures = textureLoader.LoadPartTextures(headEntry);
+                    var faceBaseTexture = textureLoader
+                        .LoadMaterialEditorCharacterTexture(
+                            "cf_m_face_00",
+                            "MainTex") ?? headTextures.Main;
+                    faceBaseTexture = KoikatsuOverlayTextureBaker.Composite(
+                        faceBaseTexture,
+                        textureLoader.LoadSkinOverlayTexture(
+                            coordinateIndex,
+                            KoikatsuSkinOverlayType.FaceUnder),
+                        runtimeTextures,
+                        "Koikatsu Face (KSOX underlay)");
+                    var faceTexture = KoikatsuFaceTextureBaker.Bake(
+                        faceCreateMaterial,
+                        faceBaseTexture,
+                        headTextures.ColorMask,
+                        card,
+                        textureLoader,
+                        coordinateIndex,
+                        runtimeTextures);
+                    faceTexture = KoikatsuOverlayTextureBaker.Composite(
+                        faceTexture,
+                        textureLoader.LoadSkinOverlayTexture(
+                            coordinateIndex,
+                            KoikatsuSkinOverlayType.FaceOver),
+                        runtimeTextures,
+                        "Koikatsu Face (KSOX overlay)");
                     var eyeTextures = KoikatsuEyeTextureBaker.Bake(
                         card.Face,
                         textureLoader,
+                        coordinateIndex,
                         runtimeTextures);
                     var faceTextures = LoadFaceTextures(
                         card,
@@ -380,12 +435,22 @@ namespace BodyEditor.ReferenceModels
                         card.Face.Appearance,
                         faceTextures,
                         runtimeMaterials);
-                    KoikatsuMaterialConverter.ApplyMaterialEditorMainTextures(
-                        bodyModel,
-                        textureLoader);
-                    KoikatsuMaterialConverter.ApplyMaterialEditorMainTextures(
+                    // Face-detail textures are applied after conversion so
+                    // MaterialEditor remains the final source of truth for
+                    // eye lines, brows, nose lines, and other face layers.
+                    // Character properties are card-global; coordinate
+                    // filtering only applies to clothes and accessories.
+                    textureLoader.ApplyMaterialEditorProperties(
                         headModel,
-                        textureLoader);
+                        4,
+                        -1,
+                        -1);
+                    KoikatsuMaterialConverter.ConfigureFaceRenderQueues(
+                        headModel,
+                        card.Face.Appearance);
+                    KoikatsuFaceNormalProxyBuilder.Attach(
+                        headModel,
+                        faceRoot);
                 }
                 else
                 {
@@ -401,6 +466,18 @@ namespace BodyEditor.ReferenceModels
                     new KoikatsuBundleSource(baseBundlePath),
                     "p_cf_body_bone",
                     bodySkeleton);
+                KoikatsuMorphControllerLoader.AttachEyebrow(
+                    loadedHeadSource,
+                    headAssetName,
+                    headModel);
+                KoikatsuMorphControllerLoader.AttachMouth(
+                    loadedHeadSource,
+                    headAssetName,
+                    headModel);
+                KoikatsuMorphControllerLoader.AttachEyeOpen(
+                    loadedHeadSource,
+                    headAssetName,
+                    headModel);
 
                 var bones = KoikatsuBodyBoneProfile.Build(bodyRoot);
                 var characterSkeleton =
@@ -410,7 +487,7 @@ namespace BodyEditor.ReferenceModels
                 var characterGeometry = new CharacterGeometry(
                     bodyModel.GetComponentsInChildren<SkinnedMeshRenderer>(true),
                     headModel.GetComponentsInChildren<SkinnedMeshRenderer>(true));
-                return new KoikatsuReferenceModelInstance(
+                var character = new KoikatsuReferenceModelInstance(
                     container,
                     bones,
                     characterSkeleton,
@@ -418,10 +495,17 @@ namespace BodyEditor.ReferenceModels
                     leases,
                     runtimeMaterials,
                     runtimeTextures,
+                    card,
                     card != null
                         ? BuildCoordinateNames(card.Coordinates.Count)
                         : Array.Empty<string>(),
                     coordinateIndex);
+                character.AttachMorphControllers(
+                    abdataRoot,
+                    catalog,
+                    new KoikatsuBundleSource(baseBundlePath));
+                ApplyImportedExpression(character, card?.Status, catalog);
+                return character;
             }
             catch
             {
@@ -445,6 +529,77 @@ namespace BodyEditor.ReferenceModels
             }
         }
 
+        internal static void ApplyImportedExpression(
+            KoikatsuReferenceModelInstance character,
+            KoikatsuCardStatus status,
+            KoikatsuListCatalog catalog)
+        {
+            if (character?.Root == null || status == null)
+            {
+                return;
+            }
+
+            ApplyPattern(
+                character.Controls?.Eyebrows,
+                status.EyebrowPattern,
+                status.EyebrowOpenMax);
+            ApplyPattern(
+                character.Controls?.Eyes?.Open,
+                ResolveEyeMorphPattern(catalog, status.EyesPattern),
+                status.EyesOpenMax);
+
+            var mouth = character.Controls?.Mouth;
+            if (mouth != null && mouth.PatternCount > 0)
+            {
+                mouth.SetPattern(
+                    Mathf.Clamp(
+                        status.MouthPattern,
+                        0,
+                        mouth.PatternCount - 1),
+                    false);
+            }
+        }
+
+        private static void ApplyPattern(
+            ICharacterPatternController controller,
+            int pattern,
+            float openMax)
+        {
+            if (controller == null || controller.PatternCount == 0)
+            {
+                return;
+            }
+
+            controller.SetPattern(
+                Mathf.Clamp(pattern, 0, controller.PatternCount - 1),
+                false);
+            // Koikatsu stores this field as the controller's maximum opening,
+            // not as the current blend progress. The original loader keeps the
+            // current opening at the fully-open blink state and changes OpenMax.
+            controller.SetOpenMax(openMax);
+            controller.SetOpenRate(1f);
+        }
+
+        internal static int ResolveEyeMorphPattern(
+            KoikatsuListCatalog catalog,
+            int eyeSetId)
+        {
+            if (catalog == null)
+            {
+                return 0;
+            }
+
+            if (!catalog.TryGet(2, eyeSetId, out var entry) &&
+                !catalog.TryGet(2, 0, out entry))
+            {
+                return 0;
+            }
+
+            return int.TryParse(entry.Get("EyesPtn"), out var pattern)
+                ? Math.Max(pattern, 0)
+                : 0;
+        }
+
         private static bool IsOptionalPartFailure(Exception exception)
         {
             return exception is IOException ||
@@ -455,8 +610,10 @@ namespace BodyEditor.ReferenceModels
 
         private static KoikatsuAssetBundleLease AcquireAssetBundle(
             IReadOnlyList<KoikatsuBundleSource> sources,
-            string assetName)
+            string assetName,
+            out KoikatsuBundleSource loadedSource)
         {
+            loadedSource = null;
             if (sources == null || sources.Count == 0)
             {
                 throw new InvalidDataException(
@@ -473,6 +630,7 @@ namespace BodyEditor.ReferenceModels
                 var lease = KoikatsuAssetBundleCache.Acquire(sources[index]);
                 if (lease.Bundle.Contains(assetName))
                 {
+                    loadedSource = sources[index];
                     return lease;
                 }
 
@@ -536,6 +694,8 @@ namespace BodyEditor.ReferenceModels
             Transform headSkeleton,
             List<KoikatsuAssetBundleLease> leases,
             List<Material> runtimeMaterials,
+            KoikatsuTextureLoader textureLoader,
+            int coordinateIndex,
             CancellationToken cancellationToken)
         {
             if (card.Hair == null || catalog == null)
@@ -548,6 +708,12 @@ namespace BodyEditor.ReferenceModels
                 new KoikatsuVanillaAssetResolver(abdataRoot, catalog, card),
                 leases,
                 runtimeMaterials);
+            var hairGloss = textureLoader.LoadCatalogTexture(
+                439,
+                card.Hair.GlossId,
+                "MainTexAB",
+                "MainTex",
+                "ChaFileHair.glossId");
             for (var index = 0; index < KoikatsuCardHair.PartCount; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -566,6 +732,13 @@ namespace BodyEditor.ReferenceModels
                         LocalEulerAngles = part.Rotation,
                         LocalScale = part.Scale,
                         HairMaterial = part,
+                        HairGlossTexture = hairGloss,
+                        TextureLoader = textureLoader,
+                        // MaterialEditor scopes hair independently from
+                        // accessories and keys each part by its hair slot.
+                        MaterialEditorObjectType = 3,
+                        MaterialEditorCoordinateIndex = 0,
+                        MaterialEditorSlot = index,
                     });
             }
         }
@@ -672,6 +845,10 @@ namespace BodyEditor.ReferenceModels
                         ClothesMaterial = part,
                         Textures = textures,
                         BakedClothesTextures = bakedTextures,
+                        TextureLoader = textureLoader,
+                        MaterialEditorObjectType = 1,
+                        MaterialEditorCoordinateIndex = coordinateIndex,
+                        MaterialEditorSlot = index,
                     });
                 ApplyWornClothesState(instance);
                 if (index == 1 || index == 3)
@@ -820,6 +997,10 @@ namespace BodyEditor.ReferenceModels
                         ClothesMaterial = topPart,
                         Textures = textures,
                         BakedClothesTextures = bakedTextures,
+                        TextureLoader = textureLoader,
+                        MaterialEditorObjectType = 1,
+                        MaterialEditorCoordinateIndex = coordinateIndex,
+                        MaterialEditorSlot = topType == 1 ? 0 : 2,
                     });
                 ApplyWornClothesState(instance);
             }
@@ -882,6 +1063,7 @@ namespace BodyEditor.ReferenceModels
             Transform sharedRootBone,
             List<KoikatsuAssetBundleLease> leases,
             List<Material> runtimeMaterials,
+            KoikatsuTextureLoader textureLoader,
             int coordinateIndex,
             CancellationToken cancellationToken)
         {
@@ -950,6 +1132,10 @@ namespace BodyEditor.ReferenceModels
                         SharedRootBone = isSkinned ? sharedRootBone : null,
                         AccessoryMaterial = accessory,
                         AccessoryHairMaterial = hair,
+                        TextureLoader = textureLoader,
+                        MaterialEditorObjectType = 2,
+                        MaterialEditorCoordinateIndex = coordinateIndex,
+                        MaterialEditorSlot = slot,
                     });
                 if (instance != null)
                 {
@@ -1136,18 +1322,44 @@ namespace BodyEditor.ReferenceModels
             Transform destinationRoot,
             Transform sourceRoot)
         {
-            var source = BuildNameMap(sourceRoot);
+            var source = new Dictionary<string, List<Transform>>(
+                StringComparer.Ordinal);
+            var sourceTransforms = sourceRoot.GetComponentsInChildren<Transform>(
+                true);
+            for (var index = 0; index < sourceTransforms.Length; index++)
+            {
+                var transform = sourceTransforms[index];
+                if (!source.TryGetValue(transform.name, out var matches))
+                {
+                    matches = new List<Transform>();
+                    source.Add(transform.name, matches);
+                }
+
+                matches.Add(transform);
+            }
+
+            var occurrence = new Dictionary<string, int>(
+                StringComparer.Ordinal);
             var destination = destinationRoot.GetComponentsInChildren<Transform>(true);
             for (var index = 0; index < destination.Length; index++)
             {
-                if (!source.TryGetValue(destination[index].name, out var match))
+                var transform = destination[index];
+                if (!source.TryGetValue(transform.name, out var matches))
                 {
                     continue;
                 }
 
-                destination[index].localPosition = match.localPosition;
-                destination[index].localRotation = match.localRotation;
-                destination[index].localScale = match.localScale;
+                occurrence.TryGetValue(transform.name, out var ordinal);
+                occurrence[transform.name] = ordinal + 1;
+                if (ordinal >= matches.Count)
+                {
+                    continue;
+                }
+
+                var match = matches[ordinal];
+                transform.localPosition = match.localPosition;
+                transform.localRotation = match.localRotation;
+                transform.localScale = match.localScale;
             }
         }
 
@@ -1157,6 +1369,10 @@ namespace BodyEditor.ReferenceModels
             Transform sharedRootBone,
             string duplicateRootName)
         {
+            var duplicateRoot = FindByName(model.transform, duplicateRootName);
+            var preserveLocalSkeleton = KoikatsuBoneProxyFollower.RequiresProxy(
+                duplicateRoot,
+                targetBones);
             var renderers = model.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             for (var rendererIndex = 0;
                  rendererIndex < renderers.Length;
@@ -1194,11 +1410,19 @@ namespace BodyEditor.ReferenceModels
                 }
             }
 
-            var duplicateRoot = FindByName(model.transform, duplicateRootName);
             if (duplicateRoot != null)
             {
-                duplicateRoot.SetParent(null, false);
-                DestroyRuntimeObject(duplicateRoot.gameObject);
+                if (preserveLocalSkeleton)
+                {
+                    model.AddComponent<KoikatsuBoneProxyFollower>().Configure(
+                        duplicateRoot,
+                        targetBones);
+                }
+                else
+                {
+                    duplicateRoot.SetParent(null, false);
+                    DestroyRuntimeObject(duplicateRoot.gameObject);
+                }
             }
         }
 
@@ -1240,16 +1464,25 @@ namespace BodyEditor.ReferenceModels
         IReferenceModelPhysicsController,
         IReferenceModelSkeletonProvider,
         IReferenceModelVariantProvider,
-        ICharacterModel
+        ICharacterModel,
+        ICharacterKinematicGroupController
     {
         private GameObject root;
         private IReadOnlyList<ReferenceModelBone> bones;
         private CharacterSkeleton characterSkeleton;
         private CharacterGeometry characterGeometry;
         private CharacterPoseCoordinator poseCoordinator;
+        private CharacterMouthController mouthController;
+        private CharacterEyeOpenController eyeOpenController;
+        private CharacterEyebrowController eyebrowController;
+        private CharacterHandPoseController handPoseController;
+        private CharacterEyeLookController eyeLookController;
+        private ICharacterControls controls;
         private List<KoikatsuAssetBundleLease> bundleLeases;
         private List<Material> runtimeMaterials;
         private List<Texture2D> runtimeTextures;
+        private readonly List<Object> runtimeObjects = new List<Object>();
+        private readonly KoikatsuCard sourceCard;
         private IReadOnlyList<string> variantNames;
         private bool physicsEnabled;
 
@@ -1261,6 +1494,7 @@ namespace BodyEditor.ReferenceModels
             List<KoikatsuAssetBundleLease> bundleLeases,
             List<Material> runtimeMaterials,
             List<Texture2D> runtimeTextures,
+            KoikatsuCard sourceCard,
             IReadOnlyList<string> variantNames,
             int activeVariantIndex)
         {
@@ -1273,12 +1507,14 @@ namespace BodyEditor.ReferenceModels
             poseCoordinator = CharacterPoseCoordinator.Attach(
                 root,
                 characterSkeleton);
+            controls = new CharacterControlSet(poseCoordinator, this);
             this.bundleLeases = bundleLeases ??
                 throw new ArgumentNullException(nameof(bundleLeases));
             this.runtimeMaterials = runtimeMaterials ??
                 throw new ArgumentNullException(nameof(runtimeMaterials));
             this.runtimeTextures = runtimeTextures ??
                 throw new ArgumentNullException(nameof(runtimeTextures));
+            this.sourceCard = sourceCard;
             this.variantNames = variantNames ??
                 throw new ArgumentNullException(nameof(variantNames));
             ActiveVariantIndex = activeVariantIndex;
@@ -1289,13 +1525,119 @@ namespace BodyEditor.ReferenceModels
 
         public GameObject Root => root;
 
+        internal KoikatsuCard SourceCard => sourceCard;
+
         public IReadOnlyList<ReferenceModelBone> Bones => bones;
 
         public CharacterSkeleton Skeleton => characterSkeleton;
 
         public CharacterGeometry Geometry => characterGeometry;
 
-        public CharacterPoseCoordinator PoseCoordinator => poseCoordinator;
+        public ICharacterControls Controls => controls;
+
+        public CharacterKinematicModes SupportedKinematicModes
+        {
+            get
+            {
+                var pose = root != null
+                    ? root.GetComponent<KoikatsuStudioCharacterPose>()
+                    : null;
+                return pose != null
+                    ? pose.SupportedKinematicModes
+                    : CharacterKinematicModes.None;
+            }
+        }
+
+        public CharacterKinematicMode KinematicMode
+        {
+            get
+            {
+                var pose = root != null
+                    ? root.GetComponent<KoikatsuStudioCharacterPose>()
+                    : null;
+                return pose != null
+                    ? pose.KinematicMode
+                    : CharacterKinematicMode.None;
+            }
+        }
+
+        public CharacterKinematicModes ActiveKinematicModes =>
+            GetStudioPose()?.ActiveKinematicModes ??
+            CharacterKinematicModes.None;
+
+        public void SetKinematicMode(CharacterKinematicMode mode)
+        {
+            var pose = root != null
+                ? root.GetComponent<KoikatsuStudioCharacterPose>()
+                : null;
+            if (pose == null)
+            {
+                if (mode != CharacterKinematicMode.None)
+                {
+                    throw new InvalidOperationException(
+                        "The character has no imported kinematic pose.");
+                }
+
+                return;
+            }
+
+            pose.SetKinematicMode(mode);
+        }
+
+        public void SetKinematicModeActive(
+            CharacterKinematicMode mode,
+            bool active)
+        {
+            var pose = GetStudioPose();
+            if (pose == null)
+            {
+                if (active)
+                {
+                    throw new InvalidOperationException(
+                        "The character has no imported kinematic pose.");
+                }
+
+                return;
+            }
+
+            pose.SetKinematicModeActive(mode, active);
+        }
+
+        public CharacterKinematicGroups GetSupportedGroups(
+            CharacterKinematicMode mode)
+        {
+            return GetStudioPose()?.GetSupportedGroups(mode) ??
+                   CharacterKinematicGroups.None;
+        }
+
+        public CharacterKinematicGroups GetActiveGroups(
+            CharacterKinematicMode mode)
+        {
+            return GetStudioPose()?.GetActiveGroups(mode) ??
+                   CharacterKinematicGroups.None;
+        }
+
+        public void SetGroupActive(
+            CharacterKinematicMode mode,
+            CharacterKinematicGroups group,
+            bool active)
+        {
+            var pose = GetStudioPose();
+            if (pose == null)
+            {
+                throw new InvalidOperationException(
+                    "The character has no imported kinematic pose.");
+            }
+
+            pose.SetGroupActive(mode, group, active);
+        }
+
+        private KoikatsuStudioCharacterPose GetStudioPose()
+        {
+            return root != null
+                ? root.GetComponent<KoikatsuStudioCharacterPose>()
+                : null;
+        }
 
         public CharacterModelFeatures Features
         {
@@ -1310,11 +1652,6 @@ namespace BodyEditor.ReferenceModels
                 if (characterGeometry.HasAnatomyGeometry)
                 {
                     result |= CharacterModelFeatures.AnatomyGeometry;
-                }
-
-                if (poseCoordinator != null)
-                {
-                    result |= CharacterModelFeatures.PosePipeline;
                 }
 
                 if (characterSkeleton.SupportsBodyConstraints &&
@@ -1359,6 +1696,58 @@ namespace BodyEditor.ReferenceModels
             bundleLeases.Add(lease);
         }
 
+        internal void AddRuntimeObject(Object value)
+        {
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            if (root == null)
+            {
+                throw new ObjectDisposedException(
+                    nameof(KoikatsuReferenceModelInstance));
+            }
+
+            runtimeObjects.Add(value);
+        }
+
+        internal void AttachMorphControllers(
+            string abdataRoot,
+            KoikatsuListCatalog catalog,
+            KoikatsuBundleSource bodyBundleSource)
+        {
+            mouthController = root != null
+                ? root.GetComponentInChildren<CharacterMouthController>(true)
+                : null;
+            eyeOpenController = root != null
+                ? root.GetComponentInChildren<CharacterEyeOpenController>(true)
+                : null;
+            eyebrowController = root != null
+                ? root.GetComponentInChildren<CharacterEyebrowController>(true)
+                : null;
+            handPoseController = KoikatsuMorphControllerLoader.CreateHands(
+                abdataRoot,
+                catalog,
+                root,
+                characterSkeleton,
+                poseCoordinator);
+            eyeLookController = KoikatsuMorphControllerLoader.AttachEyes(
+                bodyBundleSource,
+                "p_cf_head_bone",
+                root,
+                characterSkeleton,
+                poseCoordinator);
+            controls = new CharacterControlSet(
+                poseCoordinator,
+                this,
+                mouthController,
+                eyeOpenController,
+                eyeLookController,
+                handPoseController,
+                eyebrowController);
+        }
+
         public void Dispose()
         {
             if (root == null)
@@ -1384,6 +1773,13 @@ namespace BodyEditor.ReferenceModels
             }
 
             runtimeTextures.Clear();
+            for (var index = 0; index < runtimeObjects.Count; index++)
+            {
+                KoikatsuCharacterAssembler.DestroyRuntimeObject(
+                    runtimeObjects[index]);
+            }
+
+            runtimeObjects.Clear();
             variantNames = Array.Empty<string>();
             for (var index = bundleLeases.Count - 1; index >= 0; index--)
             {
@@ -1395,6 +1791,12 @@ namespace BodyEditor.ReferenceModels
             characterSkeleton = CharacterSkeleton.Empty;
             characterGeometry = CharacterGeometry.Empty;
             poseCoordinator = null;
+            mouthController = null;
+            eyeOpenController = null;
+            eyebrowController = null;
+            handPoseController = null;
+            eyeLookController = null;
+            controls = null;
         }
     }
 }

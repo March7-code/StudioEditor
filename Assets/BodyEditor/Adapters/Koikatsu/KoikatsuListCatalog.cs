@@ -47,6 +47,12 @@ namespace BodyEditor.ReferenceModels
             animationModEntries =
                 new Dictionary<string, KoikatsuStudioAnimationEntry>(
                     StringComparer.OrdinalIgnoreCase);
+        private readonly SortedDictionary<int, KoikatsuHandPoseEntry>[]
+            handPoseEntries =
+            {
+                new SortedDictionary<int, KoikatsuHandPoseEntry>(),
+                new SortedDictionary<int, KoikatsuHandPoseEntry>(),
+            };
         private readonly HashSet<string> activeManifestGuids =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<KoikatsuMigrationInfoDto>>
@@ -283,6 +289,16 @@ namespace BodyEditor.ReferenceModels
             return TryGetStudioAnimation(group, category, id, out entry);
         }
 
+        public IReadOnlyList<KoikatsuHandPoseEntry> GetHandPoses(int hand)
+        {
+            if (hand < 0 || hand >= handPoseEntries.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(hand));
+            }
+
+            return handPoseEntries[hand].Values.ToArray();
+        }
+
         public IReadOnlyList<KoikatsuBundleSource> ResolveBundleCandidates(
             string abdataRoot,
             string relativePath,
@@ -374,12 +390,10 @@ namespace BodyEditor.ReferenceModels
                                           name.StartsWith(
                                               "Light_",
                                               StringComparison.OrdinalIgnoreCase);
-                        var isAnimationList = !string.IsNullOrEmpty(name) &&
-                                              name.StartsWith(
-                                                  "Anime_",
-                                                  StringComparison.OrdinalIgnoreCase);
+                        var isAnimationList = IsAnimationListName(name);
+                        var isHandList = TryParseHandList(name, out var hand);
                         if (!isItemList && !isMapList && !isBoneList &&
-                            !isLightList && !isAnimationList)
+                            !isLightList && !isAnimationList && !isHandList)
                         {
                             continue;
                         }
@@ -419,6 +433,10 @@ namespace BodyEditor.ReferenceModels
                             else if (isLightList)
                             {
                                 AddLightEntry(values);
+                            }
+                            else if (isHandList)
+                            {
+                                AddHandPoseEntry(hand, values);
                             }
                             else
                             {
@@ -937,10 +955,12 @@ namespace BodyEditor.ReferenceModels
             var isItemList = data.FileNameWithoutExtension.StartsWith(
                 "ItemList_",
                 StringComparison.OrdinalIgnoreCase);
-            var isAnimationList = data.FileNameWithoutExtension.StartsWith(
-                "Anime_",
+            var isAnimationList = IsAnimationListName(
+                data.FileNameWithoutExtension);
+            var isMapList = data.FileNameWithoutExtension.StartsWith(
+                "Map_",
                 StringComparison.OrdinalIgnoreCase);
-            if (!isItemList && !isAnimationList)
+            if (!isItemList && !isAnimationList && !isMapList)
             {
                 return;
             }
@@ -955,9 +975,17 @@ namespace BodyEditor.ReferenceModels
                         guid,
                         data.AssetBundleName);
                 }
-                else
+                else if (isAnimationList)
                 {
                     AddAnimationEntry(
+                        data.Entries[index],
+                        archive,
+                        guid,
+                        data.AssetBundleName);
+                }
+                else
+                {
+                    AddMapEntry(
                         data.Entries[index],
                         archive,
                         guid,
@@ -1081,6 +1109,43 @@ namespace BodyEditor.ReferenceModels
                     target));
         }
 
+        private void AddHandPoseEntry(
+            int hand,
+            IReadOnlyList<string> values)
+        {
+            if (hand < 0 || hand >= handPoseEntries.Length ||
+                values == null || values.Count < 5 ||
+                !int.TryParse(values[0], out var id) ||
+                string.IsNullOrWhiteSpace(values[2]) ||
+                string.IsNullOrWhiteSpace(values[3]) ||
+                string.IsNullOrWhiteSpace(values[4]))
+            {
+                return;
+            }
+
+            handPoseEntries[hand][id] = new KoikatsuHandPoseEntry(
+                id,
+                GetValue(values, 1),
+                values[2],
+                values[3],
+                values[4]);
+        }
+
+        private static bool TryParseHandList(string name, out int hand)
+        {
+            hand = -1;
+            if (string.IsNullOrEmpty(name) ||
+                !name.StartsWith("HandAnime_", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var parts = name.Split('_');
+            return parts.Length >= 2 &&
+                   int.TryParse(parts[1], out hand) &&
+                   hand >= 0 && hand <= 1;
+        }
+
         private void AddAnimationEntry(
             IReadOnlyList<string> values,
             KoikatsuZipmodArchive archive = null,
@@ -1093,11 +1158,21 @@ namespace BodyEditor.ReferenceModels
                 !int.TryParse(values[2], out var category) ||
                 (string.IsNullOrWhiteSpace(values[4]) &&
                  string.IsNullOrWhiteSpace(fallbackBundle)) ||
-                string.IsNullOrWhiteSpace(values[5]) ||
-                string.IsNullOrWhiteSpace(values[6]))
+                string.IsNullOrWhiteSpace(values[5]))
             {
                 return;
             }
+
+            var isHAnimation = IsHAnimationRow(values);
+            var stateName = isHAnimation ? GetValue(values, 8) : values[6];
+            if (string.IsNullOrWhiteSpace(stateName))
+            {
+                return;
+            }
+
+            var isMotion = isHAnimation &&
+                           bool.TryParse(GetValue(values, 12), out var motion) &&
+                           motion;
 
             var key = new StudioItemId(group, category, id);
             var entry = new KoikatsuStudioAnimationEntry(
@@ -1109,7 +1184,11 @@ namespace BodyEditor.ReferenceModels
                     ? fallbackBundle
                     : values[4],
                 values[5],
-                values[6],
+                stateName,
+                isHAnimation,
+                isMotion,
+                isHAnimation ? GetValue(values, 6) : string.Empty,
+                isHAnimation ? GetValue(values, 7) : string.Empty,
                 archive,
                 modGuid);
             if (archive == null)
@@ -1131,6 +1210,25 @@ namespace BodyEditor.ReferenceModels
                     animationModEntries.Add(modKey, entry);
                 }
             }
+        }
+
+        private static bool IsHAnimationRow(IReadOnlyList<string> values)
+        {
+            return values != null && values.Count >= 17 &&
+                   bool.TryParse(GetValue(values, 10), out _) &&
+                   bool.TryParse(GetValue(values, 11), out _) &&
+                   bool.TryParse(GetValue(values, 12), out _);
+        }
+
+        private static bool IsAnimationListName(string name)
+        {
+            return !string.IsNullOrEmpty(name) &&
+                   (name.StartsWith(
+                        "Anime_",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith(
+                        "HAnime_",
+                        StringComparison.OrdinalIgnoreCase));
         }
 
         private void AddStudioEntry(
@@ -1541,6 +1639,10 @@ namespace BodyEditor.ReferenceModels
             string bundlePath,
             string controllerName,
             string stateName,
+            bool isHAnimation,
+            bool isMotion,
+            string overrideBundlePath,
+            string overrideControllerName,
             KoikatsuZipmodArchive archive,
             string modGuid)
         {
@@ -1551,6 +1653,10 @@ namespace BodyEditor.ReferenceModels
             BundlePath = bundlePath ?? string.Empty;
             ControllerName = controllerName ?? string.Empty;
             StateName = stateName ?? string.Empty;
+            IsHAnimation = isHAnimation;
+            IsMotion = isMotion;
+            OverrideBundlePath = overrideBundlePath ?? string.Empty;
+            OverrideControllerName = overrideControllerName ?? string.Empty;
             Archive = archive;
             ModGuid = modGuid ?? string.Empty;
         }
@@ -1569,6 +1675,14 @@ namespace BodyEditor.ReferenceModels
 
         public string StateName { get; }
 
+        public bool IsHAnimation { get; }
+
+        public bool IsMotion { get; }
+
+        public string OverrideBundlePath { get; }
+
+        public string OverrideControllerName { get; }
+
         public KoikatsuZipmodArchive Archive { get; }
 
         public string ModGuid { get; }
@@ -1578,6 +1692,33 @@ namespace BodyEditor.ReferenceModels
             return new KoikatsuBundleSource(
                 KoikatsuAssetPath.ResolveAbdataPath(abdataRoot, BundlePath));
         }
+    }
+
+    internal sealed class KoikatsuHandPoseEntry
+    {
+        public KoikatsuHandPoseEntry(
+            int id,
+            string name,
+            string bundlePath,
+            string controllerName,
+            string clipName)
+        {
+            Id = id;
+            Name = name ?? string.Empty;
+            BundlePath = bundlePath ?? string.Empty;
+            ControllerName = controllerName ?? string.Empty;
+            ClipName = clipName ?? string.Empty;
+        }
+
+        public int Id { get; }
+
+        public string Name { get; }
+
+        public string BundlePath { get; }
+
+        public string ControllerName { get; }
+
+        public string ClipName { get; }
     }
 
     internal sealed class KoikatsuMapListEntry

@@ -1,12 +1,14 @@
 ﻿<Solution>
   <Project Path="BodyEditor.Characters.csproj" />
-  <Project Path="BodyEditor.Adapter.Koikatsu.csproj" />
+  <Project Path="Assembly-CSharp-firstpass.csproj" />
+  <Project Path="Assembly-CSharp-Editor-firstpass.csproj" />
   <Project Path="BodyEditor.Editor.csproj" />
+  <Project Path="BodyEditor.Adapter.Koikatsu.csproj" />
   <Project Path="BodyEditor.Runtime.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
   <Project Path="BodyEditor.Tests.Editor.csproj" />
   <Project Path="BodyEditor.Rendering.csproj" />
+  <Project Path="BodyEditor.RenderScheme.DefaultAnime.csproj" />
   <Project Path="BodyEditor.Adapter.Pmx.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
-  <Project Path="BodyEditor.RenderScheme.DefaultAnime.csproj" />
 </Solution>

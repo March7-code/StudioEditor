@@ -56,6 +56,8 @@
     <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuZipmodArchiveTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuLegacyBundleSanitizerTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\ReferenceMeshTopologyTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuPhysicsTests.cs" />
+    <Compile Include="Assets\BodyEditor\Tests\Editor\KoikatsuMaterialConverterTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\HumanoidSkeletonTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\CharacterRenderSchemeTests.cs" />
     <Compile Include="Assets\BodyEditor\Tests\Editor\ReferenceSectionRingTests.cs" />
@@ -1214,6 +1216,10 @@
       <HintPath>F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\ref\System.Text.Json.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="Unity.RenderPipelines.Universal.Runtime">
+      <HintPath>Library\ScriptAssemblies\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.TestRunner">
       <HintPath>Library\ScriptAssemblies\UnityEngine.TestRunner.dll</HintPath>
       <Private>False</Private>
@@ -1233,6 +1239,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="BodyEditor.Runtime.csproj" />
+    <ProjectReference Include="BodyEditor.Characters.csproj" />
     <ProjectReference Include="BodyEditor.Editor.csproj" />
     <ProjectReference Include="BodyEditor.Adapter.Koikatsu.csproj" />
     <ProjectReference Include="BodyEditor.Rendering.csproj" />

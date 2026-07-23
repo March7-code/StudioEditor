@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using BodyEditor.Characters;
 using UnityEngine;
 
@@ -30,12 +31,41 @@ namespace BodyEditor.ReferenceModels
         private FkOverride[] fkOverrides = Array.Empty<FkOverride>();
         private Transform[] ikTargets;
         private bool[] activeIk;
+        private bool[] activeFk;
         private Dictionary<string, Transform> targetsByName;
-        private CharacterPoseCoordinator poseCoordinator;
+        private ICharacterPosePipeline poseCoordinator;
         private ICharacterPoseModifier fkModifier;
         private ICharacterPoseModifier ikModifier;
-        private bool ikEnabled;
+        private KoikatsuStudioFinalIkRig finalIkRig;
+        private CharacterKinematicModes supportedKinematicModes;
+        private CharacterKinematicModes activeKinematicModes;
         private bool initialized;
+
+        public CharacterKinematicModes SupportedKinematicModes =>
+            supportedKinematicModes;
+
+        public CharacterKinematicMode KinematicMode
+        {
+            get
+            {
+                if (activeKinematicModes ==
+                    CharacterKinematicModes.ForwardKinematics)
+                {
+                    return CharacterKinematicMode.ForwardKinematics;
+                }
+
+                if (activeKinematicModes ==
+                    CharacterKinematicModes.InverseKinematics)
+                {
+                    return CharacterKinematicMode.InverseKinematics;
+                }
+
+                return CharacterKinematicMode.None;
+            }
+        }
+
+        public CharacterKinematicModes ActiveKinematicModes =>
+            activeKinematicModes;
 
         internal static void Apply(
             KoikatsuReferenceModelInstance character,
@@ -62,24 +92,75 @@ namespace BodyEditor.ReferenceModels
 
             var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
             var transforms = BuildTransformMap(characterRoot.transform);
-            KoikatsuPhysicsRuntime.SetBustAllowed(
-                characterRoot,
-                !IsActive(source.ActiveFK, 2));
             ApplyBaseAnimation(
                 character,
                 source,
                 abdataRoot,
                 catalog,
                 transforms);
+            KoikatsuCharacterAssembler.ApplyImportedExpression(
+                character,
+                source.Card?.Status,
+                catalog);
+            ApplySceneExpression(character, source);
+            ApplyHandPoses(character, source);
 
-            var hasFk = source.EnableFK && source.Bones.Count != 0;
-            var hasIk = source.EnableIK && source.IkTargets.Count != 0;
+            var hasFk = source.Bones.Count != 0;
+            var hasIk = source.IkTargets.Count != 0;
             if (hasFk || hasIk)
             {
                 var pose = characterRoot.AddComponent<
                     KoikatsuStudioCharacterPose>();
                 pose.Initialize(character, source, catalog, transforms);
             }
+        }
+
+        private static void ApplySceneExpression(
+            KoikatsuReferenceModelInstance character,
+            KoikatsuSceneCharacter source)
+        {
+            var mouth = character.Controls?.Mouth;
+            if (mouth != null)
+            {
+                mouth.SetFixedOpenRate(source.MouthOpen);
+            }
+
+            var eyeLook = character.Controls?.Eyes?.Look as
+                CharacterEyeLookController;
+            var data = source.EyeLookData;
+            if (eyeLook == null || data == null || data.Length < 32)
+            {
+                return;
+            }
+
+            try
+            {
+                using (var stream = new MemoryStream(data, false))
+                using (var reader = new BinaryReader(stream))
+                {
+                    var left = ReadQuaternion(reader);
+                    var right = ReadQuaternion(reader);
+                    eyeLook.SetFixedLocalRotations(left, right);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException ||
+                exception is ArgumentException)
+            {
+                Debug.LogWarning(
+                    "Could not restore the Koikatsu Studio eye pose: " +
+                    exception.Message,
+                    character.Root);
+            }
+        }
+
+        private static Quaternion ReadQuaternion(BinaryReader reader)
+        {
+            return new Quaternion(
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle());
         }
 
         public bool TryGetIkTarget(string name, out Transform value)
@@ -93,11 +174,158 @@ namespace BodyEditor.ReferenceModels
             return false;
         }
 
+        public void SetKinematicMode(CharacterKinematicMode mode)
+        {
+            if (mode != CharacterKinematicMode.None && !SupportsMode(mode))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(mode),
+                    mode,
+                    "The imported character does not support this kinematic mode.");
+            }
+
+            var modes = ModeFlag(mode);
+            if (activeKinematicModes == modes)
+            {
+                return;
+            }
+
+            activeKinematicModes = modes;
+            UpdateKinematicState();
+            poseCoordinator?.EvaluateNow();
+        }
+
+        public void SetKinematicModeActive(
+            CharacterKinematicMode mode,
+            bool active)
+        {
+            var modeFlag = ModeFlag(mode);
+            if (modeFlag == CharacterKinematicModes.None)
+            {
+                throw new ArgumentOutOfRangeException(nameof(mode));
+            }
+
+            if (active && (supportedKinematicModes & modeFlag) == 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(mode),
+                    mode,
+                    "The imported character does not support this " +
+                    "kinematic mode.");
+            }
+
+            var next = active
+                ? modeFlag
+                : activeKinematicModes & ~modeFlag;
+            if (next == activeKinematicModes)
+            {
+                return;
+            }
+
+            activeKinematicModes = next;
+            UpdateKinematicState();
+            poseCoordinator?.EvaluateNow();
+        }
+
+        public CharacterKinematicGroups GetSupportedGroups(
+            CharacterKinematicMode mode)
+        {
+            if (mode == CharacterKinematicMode.ForwardKinematics)
+            {
+                var result = CharacterKinematicGroups.None;
+                for (var index = 0; index < fkOverrides.Length; index++)
+                {
+                    result |= FkGroupAt(fkOverrides[index].GroupIndex);
+                }
+
+                return result;
+            }
+
+            if (mode == CharacterKinematicMode.InverseKinematics)
+            {
+                var result = CharacterKinematicGroups.None;
+                for (var index = 0; index < 5; index++)
+                {
+                    if (HasIkGroup(index))
+                    {
+                        result |= IkGroupAt(index);
+                    }
+                }
+
+                return result;
+            }
+
+            return CharacterKinematicGroups.None;
+        }
+
+        public CharacterKinematicGroups GetActiveGroups(
+            CharacterKinematicMode mode)
+        {
+            var values = mode == CharacterKinematicMode.ForwardKinematics
+                ? activeFk
+                : mode == CharacterKinematicMode.InverseKinematics
+                    ? activeIk
+                    : null;
+            var count = mode == CharacterKinematicMode.ForwardKinematics
+                ? 7
+                : mode == CharacterKinematicMode.InverseKinematics
+                    ? 5
+                    : 0;
+            var result = CharacterKinematicGroups.None;
+            for (var index = 0; index < count; index++)
+            {
+                if (IsActive(values, index))
+                {
+                    result |= mode == CharacterKinematicMode.ForwardKinematics
+                        ? FkGroupAt(index)
+                        : IkGroupAt(index);
+                }
+            }
+
+            return result;
+        }
+
+        public void SetGroupActive(
+            CharacterKinematicMode mode,
+            CharacterKinematicGroups group,
+            bool active)
+        {
+            var values = mode == CharacterKinematicMode.ForwardKinematics
+                ? activeFk
+                : mode == CharacterKinematicMode.InverseKinematics
+                    ? activeIk
+                    : null;
+            var count = mode == CharacterKinematicMode.ForwardKinematics
+                ? 7
+                : mode == CharacterKinematicMode.InverseKinematics
+                    ? 5
+                    : 0;
+            if (values == null || group == CharacterKinematicGroups.None)
+            {
+                return;
+            }
+
+            for (var index = 0; index < count && index < values.Length; index++)
+            {
+                var candidate = mode == CharacterKinematicMode.ForwardKinematics
+                    ? FkGroupAt(index)
+                    : IkGroupAt(index);
+                if ((group & candidate) != 0)
+                {
+                    values[index] = active;
+                }
+            }
+
+            UpdateKinematicState();
+            poseCoordinator?.EvaluateNow();
+        }
+
         private void OnDestroy()
         {
             initialized = false;
             if (poseCoordinator != null)
             {
+                poseCoordinator.EvaluationStarting -= SolveFinalIk;
                 poseCoordinator.UnregisterModifier(fkModifier);
                 poseCoordinator.UnregisterModifier(ikModifier);
             }
@@ -105,6 +333,21 @@ namespace BodyEditor.ReferenceModels
             poseCoordinator = null;
             fkModifier = null;
             ikModifier = null;
+            finalIkRig?.Disable();
+            finalIkRig = null;
+        }
+
+        private void OnEnable()
+        {
+            if (initialized)
+            {
+                UpdateKinematicState();
+            }
+        }
+
+        private void OnDisable()
+        {
+            finalIkRig?.Disable();
         }
 
         private void Initialize(
@@ -113,7 +356,7 @@ namespace BodyEditor.ReferenceModels
             KoikatsuListCatalog catalog,
             IReadOnlyDictionary<string, Transform> transforms)
         {
-            poseCoordinator = character.PoseCoordinator;
+            poseCoordinator = character.Controls?.Pose?.Pipeline;
             if (poseCoordinator == null)
             {
                 throw new InvalidOperationException(
@@ -130,6 +373,11 @@ namespace BodyEditor.ReferenceModels
             for (var index = 0; index < activeIk.Length; index++)
             {
                 activeIk[index] = source.ActiveIK[index];
+            }
+            activeFk = new bool[source.ActiveFK.Count];
+            for (var index = 0; index < activeFk.Length; index++)
+            {
+                activeFk[index] = source.ActiveFK[index];
             }
 
             ikTargets = new Transform[ikTargetNames.Length];
@@ -152,8 +400,46 @@ namespace BodyEditor.ReferenceModels
                 targetsByName.Add(target.name, target);
             }
 
-            ikEnabled = source.EnableIK && source.IkTargets.Count != 0;
+            supportedKinematicModes = CharacterKinematicModes.None;
+            if (fkOverrides.Length > 0)
+            {
+                supportedKinematicModes |=
+                    CharacterKinematicModes.ForwardKinematics;
+            }
+
+            var ikAvailable = source.IkTargets.Count != 0;
+            if (ikAvailable)
+            {
+                supportedKinematicModes |=
+                    CharacterKinematicModes.InverseKinematics;
+            }
+
+            activeKinematicModes = ResolveInitialModes(source);
+            var useFallbackIk = ikAvailable;
+            if (ikAvailable)
+            {
+                if (KoikatsuStudioFinalIkRig.TryCreate(
+                        gameObject,
+                        transforms,
+                        ikTargets,
+                        out finalIkRig,
+                        out var finalIkError))
+                {
+                    useFallbackIk = false;
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        "Could not initialize Final IK for the imported " +
+                        $"Koikatsu character; using the legacy limb solver: " +
+                        finalIkError,
+                        gameObject);
+                }
+            }
+
             initialized = true;
+            poseCoordinator.EvaluationStarting += SolveFinalIk;
+            UpdateKinematicState();
             if (fkOverrides.Length > 0)
             {
                 fkModifier = new PoseModifier(
@@ -163,7 +449,7 @@ namespace BodyEditor.ReferenceModels
                 poseCoordinator.RegisterModifier(fkModifier);
             }
 
-            if (ikEnabled)
+            if (useFallbackIk)
             {
                 ikModifier = new PoseModifier(
                     this,
@@ -175,13 +461,56 @@ namespace BodyEditor.ReferenceModels
             poseCoordinator.EvaluateNow();
         }
 
+        private void SolveFinalIk()
+        {
+            if (initialized)
+            {
+                finalIkRig?.Solve();
+            }
+        }
+
+        private CharacterKinematicModes ResolveInitialModes(
+            KoikatsuSceneCharacter source)
+        {
+            if (source.EnableIK &&
+                SupportsMode(CharacterKinematicMode.InverseKinematics))
+            {
+                return CharacterKinematicModes.InverseKinematics;
+            }
+
+            if (source.EnableFK &&
+                SupportsMode(CharacterKinematicMode.ForwardKinematics))
+            {
+                return CharacterKinematicModes.ForwardKinematics;
+            }
+
+            return CharacterKinematicModes.None;
+        }
+
+        private bool SupportsMode(CharacterKinematicMode mode)
+        {
+            var required = ModeFlag(mode);
+            return required == CharacterKinematicModes.None ||
+                   (supportedKinematicModes & required) != 0;
+        }
+
+        private static CharacterKinematicModes ModeFlag(
+            CharacterKinematicMode mode)
+        {
+            return mode == CharacterKinematicMode.ForwardKinematics
+                ? CharacterKinematicModes.ForwardKinematics
+                : mode == CharacterKinematicMode.InverseKinematics
+                    ? CharacterKinematicModes.InverseKinematics
+                    : CharacterKinematicModes.None;
+        }
+
         private static FkOverride[] BuildFkOverrides(
             KoikatsuSceneCharacter source,
             KoikatsuListCatalog catalog,
             IReadOnlyDictionary<string, Transform> transforms,
             CharacterSkeleton poseSkeleton)
         {
-            if (!source.EnableFK || source.Bones.Count == 0)
+            if (source.Bones.Count == 0)
             {
                 return Array.Empty<FkOverride>();
             }
@@ -190,7 +519,7 @@ namespace BodyEditor.ReferenceModels
             foreach (var pair in source.Bones)
             {
                 if (!catalog.TryGetStudioBone(pair.Key, out var entry) ||
-                    !IsFkGroupActive(entry.Group, source.ActiveFK) ||
+                    !TryGetFkGroupIndex(entry.Group, out var groupIndex) ||
                     !transforms.TryGetValue(entry.BoneName, out var target) ||
                     !poseSkeleton.TryGetBoneIndex(target, out var boneIndex))
                 {
@@ -199,7 +528,8 @@ namespace BodyEditor.ReferenceModels
 
                 result.Add(new FkOverride(
                     boneIndex,
-                    Quaternion.Euler(pair.Value.Rotation)));
+                    Quaternion.Euler(pair.Value.Rotation),
+                    groupIndex));
             }
 
             return result.ToArray();
@@ -209,6 +539,11 @@ namespace BodyEditor.ReferenceModels
         {
             for (var index = 0; index < fkOverrides.Length; index++)
             {
+                if (!IsActive(activeFk, fkOverrides[index].GroupIndex))
+                {
+                    continue;
+                }
+
                 pose.SetLocalRotation(
                     fkOverrides[index].BoneIndex,
                     fkOverrides[index].Rotation);
@@ -257,6 +592,7 @@ namespace BodyEditor.ReferenceModels
             }
 
             KoikatsuAssetBundleLease lease = null;
+            KoikatsuAssetBundleLease overrideLease = null;
             try
             {
                 var bundleSources = catalog.ResolveBundleCandidates(
@@ -279,7 +615,42 @@ namespace BodyEditor.ReferenceModels
                     return;
                 }
 
-                animator.runtimeAnimatorController = controller;
+                RuntimeAnimatorController appliedController = controller;
+                if (entry.IsHAnimation &&
+                    !string.IsNullOrWhiteSpace(entry.OverrideBundlePath) &&
+                    entry.OverrideBundlePath != "0" &&
+                    !string.IsNullOrWhiteSpace(entry.OverrideControllerName) &&
+                    entry.OverrideControllerName != "0")
+                {
+                    var overrideSources = catalog.ResolveBundleCandidates(
+                        abdataRoot,
+                        entry.OverrideBundlePath,
+                        entry.Archive);
+                    overrideLease = KoikatsuVirtualAssetLoader
+                        .AcquireAsset<RuntimeAnimatorController>(
+                            overrideSources,
+                            entry.OverrideControllerName,
+                            out var overrideController,
+                            out _);
+                    if (overrideController != null)
+                    {
+                        var combined = CreateAnimatorOverrideController(
+                            controller,
+                            overrideController);
+                        character.AddRuntimeObject(combined);
+                        appliedController = combined;
+                    }
+                    else
+                    {
+                        Debug.LogWarning(
+                            "Could not restore Koikatsu Studio H animation " +
+                            $"'{entry.Name}': override controller " +
+                            $"'{entry.OverrideControllerName}' was not found.",
+                            character.Root);
+                    }
+                }
+
+                animator.runtimeAnimatorController = appliedController;
                 // The body skeleton is instantiated before its scene animation
                 // controller is known. Rebind the cloned hierarchy so all
                 // humanoid/generic animation paths resolve against this copy,
@@ -287,6 +658,7 @@ namespace BodyEditor.ReferenceModels
                 animator.Rebind();
                 animator.applyRootMotion = false;
                 animator.speed = source.AnimationSpeed;
+                ApplyAnimatorParameters(animator, source, entry);
                 animator.Play(
                     entry.StateName,
                     0,
@@ -295,6 +667,11 @@ namespace BodyEditor.ReferenceModels
 
                 character.AddBundleLease(lease);
                 lease = null;
+                if (overrideLease != null)
+                {
+                    character.AddBundleLease(overrideLease);
+                    overrideLease = null;
+                }
             }
             catch (Exception exception)
             {
@@ -306,6 +683,134 @@ namespace BodyEditor.ReferenceModels
             finally
             {
                 lease?.Dispose();
+                overrideLease?.Dispose();
+            }
+        }
+
+        private static AnimatorOverrideController
+            CreateAnimatorOverrideController(
+                RuntimeAnimatorController source,
+                RuntimeAnimatorController overrides)
+        {
+            var result = new AnimatorOverrideController(source)
+            {
+                name = overrides.name,
+            };
+            var clips = overrides.animationClips;
+            for (var index = 0; index < clips.Length; index++)
+            {
+                if (clips[index] != null)
+                {
+                    result[clips[index].name] = clips[index];
+                }
+            }
+
+            return result;
+        }
+
+        private static void ApplyAnimatorParameters(
+            Animator animator,
+            KoikatsuSceneCharacter source,
+            KoikatsuStudioAnimationEntry entry)
+        {
+            var bodyShape = source.Card?.Body?.ShapeValues;
+            if (bodyShape != null && bodyShape.Count > 0)
+            {
+                SetFloatIfPresent(animator, "height", bodyShape[0]);
+            }
+
+            if (!entry.IsHAnimation)
+            {
+                return;
+            }
+
+            if (entry.IsMotion)
+            {
+                SetFloatIfPresent(
+                    animator,
+                    "motion",
+                    source.AnimationPattern);
+            }
+
+            if (bodyShape != null && bodyShape.Count > 4)
+            {
+                SetFloatIfPresent(animator, "Breast", bodyShape[4]);
+            }
+
+            var heightParameter = HasFloatParameter(animator, "height1")
+                ? "height1"
+                : "height";
+            SetFloatIfPresent(
+                animator,
+                heightParameter,
+                source.AnimationOptionParam1);
+            var breastParameter = HasFloatParameter(animator, "Breast1")
+                ? "Breast1"
+                : "Breast";
+            SetFloatIfPresent(
+                animator,
+                breastParameter,
+                source.AnimationOptionParam2);
+        }
+
+        private static bool SetFloatIfPresent(
+            Animator animator,
+            string name,
+            float value)
+        {
+            if (!HasFloatParameter(animator, name))
+            {
+                return false;
+            }
+
+            animator.SetFloat(Animator.StringToHash(name), value);
+            return true;
+        }
+
+        private static bool HasFloatParameter(Animator animator, string name)
+        {
+            var hash = Animator.StringToHash(name);
+            var parameters = animator.parameters;
+            for (var index = 0; index < parameters.Length; index++)
+            {
+                if (parameters[index].nameHash == hash &&
+                    parameters[index].type == AnimatorControllerParameterType.Float)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void ApplyHandPoses(
+            KoikatsuReferenceModelInstance character,
+            KoikatsuSceneCharacter source)
+        {
+            var hands = character.Controls?.Hands;
+            if (hands == null)
+            {
+                return;
+            }
+
+            ApplyHandPose(
+                hands,
+                CharacterHand.Left,
+                source.LeftHandPattern);
+            ApplyHandPose(
+                hands,
+                CharacterHand.Right,
+                source.RightHandPattern);
+        }
+
+        private static void ApplyHandPose(
+            ICharacterHandPoseController controller,
+            CharacterHand hand,
+            int pattern)
+        {
+            if (pattern >= 0 && pattern < controller.GetPoseCount(hand))
+            {
+                controller.SetPose(hand, pattern);
             }
         }
 
@@ -316,6 +821,8 @@ namespace BodyEditor.ReferenceModels
                 TryGetTarget(0, out var bodyTarget))
             {
                 pose.SetWorldPosition(hips, bodyTarget.position);
+                AlignLowerBodyFrame(pose, hips, bodyTarget.position);
+                AlignUpperBodyFrame(pose, hips, bodyTarget.position);
             }
 
             if (IsActive(activeIk, 4))
@@ -369,6 +876,148 @@ namespace BodyEditor.ReferenceModels
                     11,
                     12);
             }
+        }
+
+        private void AlignLowerBodyFrame(
+            CharacterPoseBuffer pose,
+            int hips,
+            Vector3 desiredHipsPosition)
+        {
+            if (!IsActive(activeIk, 1) || !IsActive(activeIk, 2) ||
+                !TryGetPoseBone("cf_j_thigh00_L", out var leftThigh) ||
+                !TryGetPoseBone("cf_j_thigh00_R", out var rightThigh) ||
+                !TryGetTarget(7, out var leftTarget) ||
+                !TryGetTarget(10, out var rightTarget))
+            {
+                return;
+            }
+
+            var currentLeft = pose.GetWorldPosition(leftThigh);
+            var currentRight = pose.GetWorldPosition(rightThigh);
+            var currentCenter = (currentLeft + currentRight) * 0.5f;
+            var desiredCenter =
+                (leftTarget.position + rightTarget.position) * 0.5f;
+            if (!TryCreateBodyFrame(
+                    currentRight - currentLeft,
+                    pose.GetWorldPosition(hips) - currentCenter,
+                    out var currentFrame) ||
+                !TryCreateBodyFrame(
+                    rightTarget.position - leftTarget.position,
+                    desiredHipsPosition - desiredCenter,
+                    out var desiredFrame))
+            {
+                return;
+            }
+
+            var correction = desiredFrame * Quaternion.Inverse(currentFrame);
+            pose.SetWorldRotation(
+                hips,
+                correction * pose.GetWorldRotation(hips));
+        }
+
+        private void AlignUpperBodyFrame(
+            CharacterPoseBuffer pose,
+            int hips,
+            Vector3 desiredHipsPosition)
+        {
+            if (!IsActive(activeIk, 3) || !IsActive(activeIk, 4) ||
+                !TryGetPoseBone("cf_j_arm00_L", out var leftArm) ||
+                !TryGetPoseBone("cf_j_arm00_R", out var rightArm) ||
+                !TryGetTarget(1, out var leftTarget) ||
+                !TryGetTarget(4, out var rightTarget))
+            {
+                return;
+            }
+
+            var currentLeft = pose.GetWorldPosition(leftArm);
+            var currentRight = pose.GetWorldPosition(rightArm);
+            var currentCenter = (currentLeft + currentRight) * 0.5f;
+            var desiredCenter =
+                (leftTarget.position + rightTarget.position) * 0.5f;
+            if (!TryCreateBodyFrame(
+                    currentRight - currentLeft,
+                    currentCenter - pose.GetWorldPosition(hips),
+                    out var currentFrame) ||
+                !TryCreateBodyFrame(
+                    rightTarget.position - leftTarget.position,
+                    desiredCenter - desiredHipsPosition,
+                    out var desiredFrame))
+            {
+                return;
+            }
+
+            var correction = desiredFrame * Quaternion.Inverse(currentFrame);
+            ApplyDistributedWorldRotation(
+                pose,
+                correction,
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03");
+        }
+
+        private void ApplyDistributedWorldRotation(
+            CharacterPoseBuffer pose,
+            Quaternion correction,
+            params string[] boneNames)
+        {
+            var available = 0;
+            for (var index = 0; index < boneNames.Length; index++)
+            {
+                if (TryGetPoseBone(boneNames[index], out _))
+                {
+                    available++;
+                }
+            }
+
+            if (available == 0)
+            {
+                return;
+            }
+
+            var step = Quaternion.Slerp(
+                Quaternion.identity,
+                correction,
+                1f / available);
+            for (var index = 0; index < boneNames.Length; index++)
+            {
+                if (TryGetPoseBone(boneNames[index], out var bone))
+                {
+                    pose.SetWorldRotation(
+                        bone,
+                        step * pose.GetWorldRotation(bone));
+                }
+            }
+        }
+
+        private static bool TryCreateBodyFrame(
+            Vector3 side,
+            Vector3 up,
+            out Quaternion frame)
+        {
+            if (side.sqrMagnitude < Epsilon || up.sqrMagnitude < Epsilon)
+            {
+                frame = Quaternion.identity;
+                return false;
+            }
+
+            side.Normalize();
+            up = Vector3.ProjectOnPlane(up, side);
+            if (up.sqrMagnitude < Epsilon)
+            {
+                frame = Quaternion.identity;
+                return false;
+            }
+
+            up.Normalize();
+            var forward = Vector3.Cross(side, up);
+            if (forward.sqrMagnitude < Epsilon)
+            {
+                frame = Quaternion.identity;
+                return false;
+            }
+
+            frame = Quaternion.LookRotation(forward.normalized, up);
+            return true;
         }
 
         private void SolveLimb(
@@ -529,11 +1178,26 @@ namespace BodyEditor.ReferenceModels
                     targetDirection) * pose.GetWorldRotation(joint));
         }
 
-        private static bool IsFkGroupActive(
-            int group,
-            IReadOnlyList<bool> activeGroups)
+        private void UpdateFkPhysicsState()
         {
-            int index;
+            KoikatsuPhysicsRuntime.SetBustAllowed(
+                gameObject,
+                (activeKinematicModes &
+                 CharacterKinematicModes.ForwardKinematics) == 0 ||
+                !IsActive(activeFk, 2));
+        }
+
+        private void UpdateKinematicState()
+        {
+            UpdateFkPhysicsState();
+            finalIkRig?.SetState(
+                (activeKinematicModes &
+                 CharacterKinematicModes.InverseKinematics) != 0,
+                activeIk);
+        }
+
+        private static bool TryGetFkGroupIndex(int group, out int index)
+        {
             switch (group)
             {
                 case 7:
@@ -565,10 +1229,58 @@ namespace BodyEditor.ReferenceModels
                     index = 6;
                     break;
                 default:
+                    index = -1;
                     return false;
             }
 
-            return IsActive(activeGroups, index);
+            return true;
+        }
+
+        private bool HasIkGroup(int index)
+        {
+            switch (index)
+            {
+                case 0:
+                    return TryGetTarget(0, out _);
+                case 1:
+                    return TryGetTarget(12, out _);
+                case 2:
+                    return TryGetTarget(9, out _);
+                case 3:
+                    return TryGetTarget(6, out _);
+                case 4:
+                    return TryGetTarget(3, out _);
+                default:
+                    return false;
+            }
+        }
+
+        private static CharacterKinematicGroups IkGroupAt(int index)
+        {
+            switch (index)
+            {
+                case 0: return CharacterKinematicGroups.Body;
+                case 1: return CharacterKinematicGroups.RightLeg;
+                case 2: return CharacterKinematicGroups.LeftLeg;
+                case 3: return CharacterKinematicGroups.RightHand;
+                case 4: return CharacterKinematicGroups.LeftHand;
+                default: return CharacterKinematicGroups.None;
+            }
+        }
+
+        private static CharacterKinematicGroups FkGroupAt(int index)
+        {
+            switch (index)
+            {
+                case 0: return CharacterKinematicGroups.Hair;
+                case 1: return CharacterKinematicGroups.Neck;
+                case 2: return CharacterKinematicGroups.Breast;
+                case 3: return CharacterKinematicGroups.Body;
+                case 4: return CharacterKinematicGroups.RightHand;
+                case 5: return CharacterKinematicGroups.LeftHand;
+                case 6: return CharacterKinematicGroups.Skirt;
+                default: return CharacterKinematicGroups.None;
+            }
         }
 
         private static bool IsActive(
@@ -612,15 +1324,21 @@ namespace BodyEditor.ReferenceModels
 
         private readonly struct FkOverride
         {
-            public FkOverride(int boneIndex, Quaternion rotation)
+            public FkOverride(
+                int boneIndex,
+                Quaternion rotation,
+                int groupIndex)
             {
                 BoneIndex = boneIndex;
                 Rotation = rotation;
+                GroupIndex = groupIndex;
             }
 
             public int BoneIndex { get; }
 
             public Quaternion Rotation { get; }
+
+            public int GroupIndex { get; }
         }
 
         private sealed class PoseModifier : ICharacterPoseModifier
@@ -641,7 +1359,10 @@ namespace BodyEditor.ReferenceModels
             public int Order { get; }
 
             public bool Enabled => owner != null && owner.initialized &&
-                                   owner.isActiveAndEnabled;
+                                   owner.isActiveAndEnabled &&
+                                   (owner.activeKinematicModes & (solveIk
+                                       ? CharacterKinematicModes.InverseKinematics
+                                       : CharacterKinematicModes.ForwardKinematics)) != 0;
 
             public void Evaluate(CharacterPoseBuffer pose)
             {

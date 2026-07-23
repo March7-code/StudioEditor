@@ -2,7 +2,9 @@
   "name": "BodyEditor.RenderScheme.DefaultAnime",
   "rootNamespace": "BodyEditor.Rendering.RenderSchemes",
   "references": [
-    "BodyEditor.Rendering"
+    "BodyEditor.Rendering",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

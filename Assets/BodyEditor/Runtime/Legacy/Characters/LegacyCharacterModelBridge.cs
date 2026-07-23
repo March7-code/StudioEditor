@@ -7,7 +7,7 @@ using UnityEngine;
 namespace BodyEditor.Characters.Legacy
 {
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(ReferenceModelImportController))]
+    [RequireComponent(typeof(SceneContentController))]
     public sealed class LegacyCharacterModelBridge :
         MonoBehaviour,
         ICharacterModelSource
@@ -15,9 +15,7 @@ namespace BodyEditor.Characters.Legacy
         private static readonly IReadOnlyList<ICharacterModel> emptyCharacters =
             Array.Empty<ICharacterModel>();
 
-        private ReferenceModelImportController importController;
-        private IReferenceModelInstance currentImport;
-
+        private SceneContentController importController;
         public event Action CharactersChanged;
 
         public IReadOnlyList<ICharacterModel> CharacterModels { get; private set; } =
@@ -25,7 +23,7 @@ namespace BodyEditor.Characters.Legacy
 
         private void OnEnable()
         {
-            importController = GetComponent<ReferenceModelImportController>();
+            importController = GetComponent<SceneContentController>();
             importController.StateChanged += HandleImportStateChanged;
             SynchronizeCharacter();
         }
@@ -37,25 +35,8 @@ namespace BodyEditor.Characters.Legacy
 
         private void SynchronizeCharacter()
         {
-            var nextImport = importController?.Current;
-            if (ReferenceEquals(currentImport, nextImport))
-            {
-                return;
-            }
-
-            currentImport = nextImport;
-            if (nextImport is ICharacterModelCollection collection)
-            {
-                CharacterModels = collection.CharacterModels ?? emptyCharacters;
-            }
-            else if (nextImport is ICharacterModel character)
-            {
-                CharacterModels = Array.AsReadOnly(new[] { character });
-            }
-            else
-            {
-                CharacterModels = emptyCharacters;
-            }
+            CharacterModels = importController?.CharacterModels ??
+                              emptyCharacters;
 
             CharactersChanged?.Invoke();
         }
@@ -68,7 +49,6 @@ namespace BodyEditor.Characters.Legacy
             }
 
             importController = null;
-            currentImport = null;
             if (CharacterModels.Count > 0)
             {
                 CharacterModels = emptyCharacters;

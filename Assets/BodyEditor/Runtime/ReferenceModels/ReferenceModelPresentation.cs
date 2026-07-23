@@ -30,7 +30,7 @@ namespace BodyEditor.ReferenceModels
         public bool IsBodyBone { get; }
     }
 
-    [RequireComponent(typeof(ReferenceModelImportController))]
+    [RequireComponent(typeof(SceneContentController))]
     public sealed class ReferenceModelPresentationController : MonoBehaviour
     {
         internal static readonly Color SkeletonColor =
@@ -50,7 +50,7 @@ namespace BodyEditor.ReferenceModels
             new List<ReferenceModelPartState>();
         private readonly List<ReferenceModelPartState> boneItems =
             new List<ReferenceModelPartState>();
-        private ReferenceModelImportController importController;
+        private SceneContentController importController;
         private GameObject currentRoot;
         private SourceRenderer[] sourceRenderers = Array.Empty<SourceRenderer>();
         private bool[] sourceInitiallyEnabled = Array.Empty<bool>();
@@ -99,7 +99,7 @@ namespace BodyEditor.ReferenceModels
 
         private void OnEnable()
         {
-            importController = GetComponent<ReferenceModelImportController>();
+            importController = GetComponent<SceneContentController>();
             importController.StateChanged += HandleImportStateChanged;
             HandleImportStateChanged();
         }
@@ -375,10 +375,12 @@ namespace BodyEditor.ReferenceModels
                 out var bodyBoneFlags);
             for (var index = 0; index < bones.Length; index++)
             {
-                boneItems.Add(new ReferenceModelPartState(
+                var boneItem = new ReferenceModelPartState(
                     boneNames[index],
                     BuildPath(root.transform, bones[index]),
-                    bodyBoneFlags[index]));
+                    bodyBoneFlags[index]);
+                boneItem.Visible = false;
+                boneItems.Add(boneItem);
             }
 
             SupportsBodyBoneView = Any(boneItems, item => item.IsBodyBone);

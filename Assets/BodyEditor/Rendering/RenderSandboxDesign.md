@@ -43,6 +43,36 @@ to the previous implementation.
 Non-character Koikatsu conversion remains on its existing fallback path until a
 scene-object sandbox processor is added.
 
+## Deferred Koikatsu Ramp Compatibility
+
+Koikatsu shader ramp textures are not interchangeable with the BodyEditor toon
+ramp. The original game applies its character-wide ramp through the global
+`_RampG` property. Modded materials can define separate shader-specific lookup
+textures and controls.
+
+One confirmed example is `FuXuan_Card.png`, top slot `2211210`. MaterialEditor
+changes two top materials from `Shader Forge/main_item_studio` to
+`Shader Forge/main_opaque`, assigns a 128x8 grayscale `AnotherRamp` texture, and
+sets `ShadowExtendAnother`. That lookup texture contains multiple non-monotonic
+segments. Sampling it as BodyEditor's `(halfLambert, rampRow)` lookup produces a
+large false shadow that resembles broken normals.
+
+The current compatibility rule is therefore:
+
+- Do not infer BodyEditor ramp compatibility from source property names such as
+  `_ShadowRamp`, `_Shadow_Ramp`, `_RampTex`, or `_AnotherRamp`.
+- Koikatsu materials without an explicitly converted compatible ramp use the
+  default toon bands.
+- A custom ramp may enter a render scheme only through the explicit
+  `CharacterRenderMaterialContext.ToonRampTexture` contract.
+
+Future high-fidelity support should be implemented in the Koikatsu adapter as a
+source-shader compatibility profile. It must identify the source shader, recover
+the original lookup coordinates and combination formula, include companion
+properties such as `ShadowExtendAnother`, and then either bake a monotonic
+BodyEditor ramp or select a dedicated shader path. Texture-property name matching
+alone is not sufficient.
+
 ## Sandbox Application Model
 
 1. Import or register a root GameObject.

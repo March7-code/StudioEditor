@@ -15,8 +15,11 @@ namespace BodyEditor.ReferenceModels
             "com.bepis.sideloader.universalautoresolver";
         private const string OldResolverId =
             "EC.Core.Sideloader.UniversalAutoResolver";
+        private const string MaterialEditorId =
+            "com.deathweasel.bepinex.materialeditor";
         private const int MaxObjectCount = 100000;
         private const int MaxCollectionCount = 1000000;
+        private const int StoredCameraSlotCount = 10;
 
         private static readonly byte[] ExtendedMarker =
         {
@@ -38,6 +41,8 @@ namespace BodyEditor.ReferenceModels
 
             var bytes = File.ReadAllBytes(path);
             var mapModGuid = ReadSideloaderMapGuid(bytes);
+            var materialEditorTextures =
+                ReadMaterialEditorSharedTextures(bytes);
             try
             {
                 using (var stream = new MemoryStream(bytes, false))
@@ -60,11 +65,23 @@ namespace BodyEditor.ReferenceModels
                         objects.Add(ReadObject(reader, kind, version, 0, key));
                     }
 
+                    AttachMaterialEditorSharedTextures(
+                        objects,
+                        materialEditorTextures);
+
                     var camera = ReadSceneCamera(
                         reader,
                         version,
                         mapModGuid,
                         out var map);
+                    var storedCameraSlots = new List<KoikatsuSceneCamera>(
+                        StoredCameraSlotCount);
+                    for (var index = 0;
+                         index < StoredCameraSlotCount;
+                         index++)
+                    {
+                        storedCameraSlots.Add(ReadCameraData(reader, index + 1));
+                    }
 
                     return new KoikatsuScene(
                         path,
@@ -72,6 +89,7 @@ namespace BodyEditor.ReferenceModels
                         objects.AsReadOnly(),
                         map,
                         camera,
+                        GetSavedCameraSlots(storedCameraSlots),
                         ReadSideloaderResolutions(bytes),
                         ReadSideloaderPatternResolutions(bytes));
                 }
@@ -259,18 +277,20 @@ namespace BodyEditor.ReferenceModels
             character.RightHandPattern = reader.ReadInt32();
             reader.ReadSingle();
             ReadBytesExact(reader, 5, "character moisture");
-            reader.ReadSingle();
-            reader.ReadBoolean();
+            character.MouthOpen = reader.ReadSingle();
+            character.LipSync = reader.ReadBoolean();
             SkipLookAtTarget(reader);
             character.EnableIK = reader.ReadBoolean();
             character.ActiveIK = ReadBooleans(reader, 5);
             character.EnableFK = reader.ReadBoolean();
             character.ActiveFK = ReadBooleans(reader, 7);
-            SkipBooleans(reader, version < new Version(0, 0, 9) ? 4 : 8);
+            character.ExpressionEnabled = ReadBooleans(
+                reader,
+                version < new Version(0, 0, 9) ? 4 : 8);
             character.AnimationSpeed = reader.ReadSingle();
             character.AnimationPattern = reader.ReadSingle();
-            reader.ReadBoolean();
-            reader.ReadBoolean();
+            character.AnimationOptionVisible = reader.ReadBoolean();
+            character.AnimationForceLoop = reader.ReadBoolean();
 
             var voices = ReadCount(reader, MaxCollectionCount, "character voices");
             for (var index = 0; index < voices; index++)
@@ -285,10 +305,12 @@ namespace BodyEditor.ReferenceModels
             reader.ReadSingle();
             reader.ReadBoolean();
             ReadColor(reader.ReadString());
-            reader.ReadSingle();
-            reader.ReadSingle();
+            character.AnimationOptionParam1 = reader.ReadSingle();
+            character.AnimationOptionParam2 = reader.ReadSingle();
             SkipLengthPrefixedBytes(reader, "character neck data");
-            SkipLengthPrefixedBytes(reader, "character eye data");
+            character.EyeLookData = ReadLengthPrefixedBytes(
+                reader,
+                "character eye data");
             character.AnimationNormalizedTime = reader.ReadSingle();
             SkipIntDictionary(reader, "character access groups");
             SkipIntDictionary(reader, "character access numbers");
@@ -513,6 +535,13 @@ namespace BodyEditor.ReferenceModels
                 reader.ReadSingle();
             }
 
+            return ReadCameraData(reader);
+        }
+
+        private static KoikatsuSceneCamera ReadCameraData(
+            BinaryReader reader,
+            int slotNumber = 0)
+        {
             var cameraVersion = reader.ReadInt32();
             var target = ReadVector3(reader);
             var rotation = ReadVector3(reader);
@@ -523,7 +552,79 @@ namespace BodyEditor.ReferenceModels
                 target,
                 rotation,
                 distance,
-                reader.ReadSingle());
+                reader.ReadSingle(),
+                slotNumber);
+        }
+
+        private static IReadOnlyList<KoikatsuSceneCamera> GetSavedCameraSlots(
+            IReadOnlyList<KoikatsuSceneCamera> storedSlots)
+        {
+            if (storedSlots == null || storedSlots.Count == 0)
+            {
+                return Array.Empty<KoikatsuSceneCamera>();
+            }
+
+            var repeatedPose = storedSlots[0];
+            var repeatedCount = 1;
+            for (var candidateIndex = 0;
+                 candidateIndex < storedSlots.Count;
+                 candidateIndex++)
+            {
+                var count = 0;
+                for (var index = 0; index < storedSlots.Count; index++)
+                {
+                    if (CameraPosesEqual(
+                            storedSlots[candidateIndex],
+                            storedSlots[index]))
+                    {
+                        count++;
+                    }
+                }
+
+                if (count > repeatedCount)
+                {
+                    repeatedPose = storedSlots[candidateIndex];
+                    repeatedCount = count;
+                }
+            }
+
+            var saved = new List<KoikatsuSceneCamera>(storedSlots.Count);
+            for (var index = 0; index < storedSlots.Count; index++)
+            {
+                if (repeatedCount < 2 ||
+                    !CameraPosesEqual(storedSlots[index], repeatedPose))
+                {
+                    saved.Add(storedSlots[index]);
+                }
+            }
+
+            return saved.AsReadOnly();
+        }
+
+        internal static bool CameraPosesEqual(
+            KoikatsuSceneCamera left,
+            KoikatsuSceneCamera right)
+        {
+            if (left == null || right == null)
+            {
+                return false;
+            }
+
+            var rotationDelta = new Vector3(
+                Mathf.DeltaAngle(
+                    left.EulerAngles.x,
+                    right.EulerAngles.x),
+                Mathf.DeltaAngle(
+                    left.EulerAngles.y,
+                    right.EulerAngles.y),
+                Mathf.DeltaAngle(
+                    left.EulerAngles.z,
+                    right.EulerAngles.z));
+            return Vector3.SqrMagnitude(left.Target - right.Target) < 0.000001f &&
+                   Vector3.SqrMagnitude(rotationDelta) < 0.000001f &&
+                   Vector3.SqrMagnitude(
+                       left.Distance - right.Distance) < 0.000001f &&
+                   Mathf.Abs(left.FieldOfView - right.FieldOfView) < 0.0001f;
         }
 
         private static void SkipIntDictionary(BinaryReader reader, string context)
@@ -556,6 +657,14 @@ namespace BodyEditor.ReferenceModels
         {
             var length = reader.ReadInt32();
             SkipBytes(reader, length, context);
+        }
+
+        private static byte[] ReadLengthPrefixedBytes(
+            BinaryReader reader,
+            string context)
+        {
+            var length = reader.ReadInt32();
+            return ReadBytesExact(reader, length, context);
         }
 
         private static void SkipBytes(
@@ -778,6 +887,76 @@ namespace BodyEditor.ReferenceModels
             }
         }
 
+        private static IReadOnlyDictionary<string, byte[]>
+            ReadMaterialEditorSharedTextures(byte[] fileData)
+        {
+            var result = new Dictionary<string, byte[]>(
+                StringComparer.OrdinalIgnoreCase);
+            if (!TryReadExtendedPayload(fileData, out var payload))
+            {
+                return result;
+            }
+
+            try
+            {
+                var plugins = MessagePackSerializer.Deserialize<
+                    Dictionary<string, KoikatsuCardReader.PluginDataDto>>(
+                    payload);
+                if (plugins == null ||
+                    !plugins.TryGetValue(MaterialEditorId, out var plugin) ||
+                    plugin?.Data == null ||
+                    !plugin.Data.TryGetValue(
+                        "DEDUPED_TextureDictionary_DATA",
+                        out var raw) ||
+                    !(raw is byte[] bytes))
+                {
+                    return result;
+                }
+
+                var textures = MessagePackSerializer.Deserialize<
+                    Dictionary<string, byte[]>>(bytes);
+                if (textures == null)
+                {
+                    return result;
+                }
+
+                foreach (var pair in textures)
+                {
+                    if (!string.IsNullOrWhiteSpace(pair.Key) &&
+                        pair.Value != null && pair.Value.Length > 0)
+                    {
+                        result[pair.Key] = pair.Value;
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    "Could not read Koikatsu Studio MaterialEditor textures: " +
+                    exception.Message);
+            }
+
+            return result;
+        }
+
+        private static void AttachMaterialEditorSharedTextures(
+            IReadOnlyList<KoikatsuSceneObject> objects,
+            IReadOnlyDictionary<string, byte[]> textures)
+        {
+            if (objects == null || textures == null || textures.Count == 0)
+            {
+                return;
+            }
+
+            for (var index = 0; index < objects.Count; index++)
+            {
+                var item = objects[index];
+                item?.Character?.Card.AttachMaterialEditorSharedTextures(
+                    textures);
+                AttachMaterialEditorSharedTextures(item?.Children, textures);
+            }
+        }
+
         private static IReadOnlyList<KoikatsuStudioPatternResolution>
             ReadSideloaderPatternResolutions(byte[] fileData)
         {
@@ -918,6 +1097,7 @@ namespace BodyEditor.ReferenceModels
             IReadOnlyList<KoikatsuSceneObject> objects,
             KoikatsuSceneMap map,
             KoikatsuSceneCamera camera,
+            IReadOnlyList<KoikatsuSceneCamera> cameraSlots,
             IReadOnlyList<KoikatsuStudioResolution> resolutions,
             IReadOnlyList<KoikatsuStudioPatternResolution> patternResolutions)
         {
@@ -926,6 +1106,7 @@ namespace BodyEditor.ReferenceModels
             Objects = objects;
             Map = map;
             Camera = camera;
+            CameraSlots = cameraSlots ?? Array.Empty<KoikatsuSceneCamera>();
             SideloaderResolutions = resolutions;
             SideloaderPatternResolutions = patternResolutions;
         }
@@ -939,6 +1120,8 @@ namespace BodyEditor.ReferenceModels
         public KoikatsuSceneMap Map { get; }
 
         public KoikatsuSceneCamera Camera { get; }
+
+        public IReadOnlyList<KoikatsuSceneCamera> CameraSlots { get; }
 
         public IReadOnlyList<KoikatsuStudioResolution> SideloaderResolutions { get; }
 
@@ -1089,12 +1272,14 @@ namespace BodyEditor.ReferenceModels
             Vector3 target,
             Vector3 eulerAngles,
             Vector3 distance,
-            float fieldOfView)
+            float fieldOfView,
+            int slotNumber = 0)
         {
             Target = target;
             EulerAngles = eulerAngles;
             Distance = distance;
             FieldOfView = fieldOfView;
+            SlotNumber = slotNumber;
         }
 
         public Vector3 Target { get; }
@@ -1104,6 +1289,8 @@ namespace BodyEditor.ReferenceModels
         public Vector3 Distance { get; }
 
         public float FieldOfView { get; }
+
+        public int SlotNumber { get; }
     }
 
     public sealed class KoikatsuSceneObject
@@ -1148,11 +1335,13 @@ namespace BodyEditor.ReferenceModels
             IkTargets = new Dictionary<int, KoikatsuSceneBone>();
             ActiveIK = Array.Empty<bool>();
             ActiveFK = Array.Empty<bool>();
+            ExpressionEnabled = Array.Empty<bool>();
+            EyeLookData = Array.Empty<byte>();
         }
 
         public int Sex { get; }
 
-        public KoikatsuCard Card { get; }
+        public KoikatsuCard Card { get; internal set; }
 
         public int ActiveCoordinateIndex => Card.ActiveCoordinateIndex;
 
@@ -1188,9 +1377,25 @@ namespace BodyEditor.ReferenceModels
 
         public int RightHandPattern { get; internal set; }
 
+        public float MouthOpen { get; internal set; }
+
+        public bool LipSync { get; internal set; }
+
+        public IReadOnlyList<bool> ExpressionEnabled { get; internal set; }
+
+        public byte[] EyeLookData { get; internal set; }
+
         public float AnimationSpeed { get; internal set; }
 
         public float AnimationPattern { get; internal set; }
+
+        public bool AnimationOptionVisible { get; internal set; }
+
+        public bool AnimationForceLoop { get; internal set; }
+
+        public float AnimationOptionParam1 { get; internal set; }
+
+        public float AnimationOptionParam2 { get; internal set; }
 
         public float AnimationNormalizedTime { get; internal set; }
 

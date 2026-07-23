@@ -108,7 +108,7 @@ namespace BodyEditor.ReferenceModels
                 out var coordinateBlock)
                 ? ReadCoordinates(coordinateBlock.Data)
                 : Array.Empty<KoikatsuCardCoordinate>();
-            var activeCoordinateIndex = ReadActiveCoordinateIndex(
+            var status = ReadStatus(
                 blocks,
                 coordinates.Count);
             var sideloaderResolutions = ReadSideloaderResolutions(blocks);
@@ -122,35 +122,50 @@ namespace BodyEditor.ReferenceModels
                 hair,
                 parameter,
                 coordinates,
-                activeCoordinateIndex,
+                status.ActiveCoordinateIndex,
+                status,
                 blocks,
                 sideloaderResolutions);
         }
 
-        private static int ReadActiveCoordinateIndex(
+        private static KoikatsuCardStatus ReadStatus(
             IReadOnlyDictionary<string, KoikatsuCardBlock> blocks,
             int coordinateCount)
         {
             if (!blocks.TryGetValue("Status", out var statusBlock))
             {
-                return 0;
+                return KoikatsuCardStatus.CreateDefault();
             }
 
             try
             {
                 var status = MessagePackSerializer.Deserialize<StatusDto>(
                     statusBlock.Data);
-                return status != null && status.CoordinateType >= 0 &&
-                       status.CoordinateType < coordinateCount
+                if (status == null)
+                {
+                    return KoikatsuCardStatus.CreateDefault();
+                }
+
+                var coordinateIndex = status.CoordinateType >= 0 &&
+                                      status.CoordinateType < coordinateCount
                     ? status.CoordinateType
                     : 0;
+                return new KoikatsuCardStatus(
+                    coordinateIndex,
+                    status.EyebrowPattern,
+                    status.EyebrowOpenMax,
+                    status.EyesPattern,
+                    status.EyesOpenMax,
+                    status.EyesBlink,
+                    status.MouthPattern,
+                    status.EyesLookPattern);
             }
             catch (Exception exception)
             {
                 Debug.LogWarning(
                     "Could not read the active Koikatsu outfit slot: " +
                     exception.Message);
-                return 0;
+                return KoikatsuCardStatus.CreateDefault();
             }
         }
 
@@ -378,7 +393,9 @@ namespace BodyEditor.ReferenceModels
                 face.LipLineId,
                 ToColor(face.LipLineColor, Color.white),
                 face.LipGlossPower,
-                ToMakeup(face.BaseMakeup));
+                ToMakeup(face.BaseMakeup),
+                face.ForegroundEyes,
+                face.ForegroundEyebrow);
         }
 
         private static KoikatsuCardBodyAppearance ToBodyAppearance(BodyDto body)
@@ -690,10 +707,60 @@ namespace BodyEditor.ReferenceModels
         }
 
         [MessagePackObject]
+        public sealed class MaterialColorPropertyDto
+        {
+            [Key("ObjectType")]
+            public int ObjectType { get; set; }
+
+            [Key("CoordinateIndex")]
+            public int CoordinateIndex { get; set; }
+
+            [Key("Slot")]
+            public int Slot { get; set; }
+
+            [Key("MaterialName")]
+            public string MaterialName { get; set; }
+
+            [Key("Property")]
+            public string Property { get; set; }
+
+            [Key("Value")]
+            public ColorDto Value { get; set; }
+        }
+
+        [MessagePackObject]
+        public sealed class MaterialFloatPropertyDto
+        {
+            [Key("ObjectType")]
+            public int ObjectType { get; set; }
+
+            [Key("CoordinateIndex")]
+            public int CoordinateIndex { get; set; }
+
+            [Key("Slot")]
+            public int Slot { get; set; }
+
+            [Key("MaterialName")]
+            public string MaterialName { get; set; }
+
+            [Key("Property")]
+            public string Property { get; set; }
+
+            [Key("Value")]
+            public string Value { get; set; }
+        }
+
+        [MessagePackObject]
         public sealed class MaterialTexturePropertyDto
         {
             [Key("ObjectType")]
             public int ObjectType { get; set; }
+
+            [Key("CoordinateIndex")]
+            public int CoordinateIndex { get; set; }
+
+            [Key("Slot")]
+            public int Slot { get; set; }
 
             [Key("MaterialName")]
             public string MaterialName { get; set; }
@@ -710,6 +777,27 @@ namespace BodyEditor.ReferenceModels
         {
             [Key("coordinateType")]
             public int CoordinateType { get; set; }
+
+            [Key("eyebrowPtn")]
+            public int EyebrowPattern { get; set; }
+
+            [Key("eyebrowOpenMax")]
+            public float EyebrowOpenMax { get; set; } = 1f;
+
+            [Key("eyesPtn")]
+            public int EyesPattern { get; set; }
+
+            [Key("eyesOpenMax")]
+            public float EyesOpenMax { get; set; } = 1f;
+
+            [Key("eyesBlink")]
+            public bool EyesBlink { get; set; } = true;
+
+            [Key("mouthPtn")]
+            public int MouthPattern { get; set; }
+
+            [Key("eyesLookPtn")]
+            public int EyesLookPattern { get; set; }
         }
 
         [MessagePackObject]
@@ -816,6 +904,12 @@ namespace BodyEditor.ReferenceModels
 
             [Key("baseMakeup")]
             public MakeupDto BaseMakeup { get; set; }
+
+            [Key("foregroundEyes")]
+            public byte ForegroundEyes { get; set; }
+
+            [Key("foregroundEyebrow")]
+            public byte ForegroundEyebrow { get; set; }
         }
 
         [MessagePackObject]

@@ -42,7 +42,7 @@ namespace BodyEditor.Characters.Controls
         };
 
         private readonly ICharacterModel model;
-        private readonly CharacterPoseCoordinator coordinator;
+        private readonly ICharacterPosePipeline coordinator;
         private readonly CharacterPoseLayer poseLayer;
         private readonly ControlPoseModifier modifier;
         private readonly Dictionary<CharacterControlPoint, ControlDefinition>
@@ -59,9 +59,9 @@ namespace BodyEditor.Characters.Controls
         public CharacterControlRig(ICharacterModel model)
         {
             this.model = model ?? throw new ArgumentNullException(nameof(model));
-            coordinator = model.PoseCoordinator ??
+            coordinator = model.Controls?.Pose?.Pipeline ??
                           throw new ArgumentException(
-                              "Character model has no pose coordinator.",
+                              "Character model has no pose pipeline.",
                               nameof(model));
             if (!coordinator.IsInitialized ||
                 !ReferenceEquals(coordinator.Skeleton, model.Skeleton))

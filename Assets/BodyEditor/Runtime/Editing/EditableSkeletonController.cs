@@ -21,7 +21,7 @@ namespace BodyEditor.Editing
         private Vector3[] basePose = Array.Empty<Vector3>();
         private HumanBodyBones? selectedBone;
         private bool symmetryEnabled = true;
-        private bool visible = true;
+        private bool visible;
         private bool dragging;
         private HumanBodyBones dragBone;
         private Plane dragPlane;

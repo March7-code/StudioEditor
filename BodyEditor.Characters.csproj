@@ -55,10 +55,12 @@
   <ItemGroup>
     <Compile Include="Assets\BodyEditor\Runtime\Characters\Pose\CharacterPoseLayer.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\Constraints\CharacterBodyConstraintRig.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Controls\CharacterEyeLookController.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\Pose\CharacterPoseCoordinator.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\CharacterModel.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\Kinematics\CharacterTwoBoneSolver.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\CharacterSkeleton.cs" />
+    <Compile Include="Assets\BodyEditor\Runtime\Characters\Controls\CharacterMorphControllers.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\Pose\CharacterPoseBuffer.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\Controls\CharacterControlRig.cs" />
     <Compile Include="Assets\BodyEditor\Runtime\Characters\CharacterGeometry.cs" />

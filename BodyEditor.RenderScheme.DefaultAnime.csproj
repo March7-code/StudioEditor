@@ -53,6 +53,7 @@
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\BodyEditor\Rendering\RenderSchemes\DefaultAnime\DefaultAnimeOutlineRendererFeature.cs" />
     <Compile Include="Assets\BodyEditor\Rendering\RenderSchemes\DefaultAnime\DefaultAnimeCharacterRenderScheme.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -1246,6 +1247,14 @@
     </Reference>
     <Reference Include="System.Text.Json">
       <HintPath>F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\ref\System.Text.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.RenderPipelines.Core.Runtime">
+      <HintPath>Library\ScriptAssemblies\Unity.RenderPipelines.Core.Runtime.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.RenderPipelines.Universal.Runtime">
+      <HintPath>Library\ScriptAssemblies\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEditor.UI">

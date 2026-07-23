@@ -15,6 +15,14 @@ namespace BodyEditor.ReferenceModels
             Position,
             Rotation,
             Scale,
+            EyesPattern,
+            EyesOpenMax,
+            EyebrowPattern,
+            EyebrowOpenMax,
+            MouthPattern,
+            MouthOpenRate,
+            LeftHandPose,
+            RightHandPose,
         }
 
         private sealed class TrackBinding
@@ -27,6 +35,11 @@ namespace BodyEditor.ReferenceModels
             public bool Enabled;
             public CharacterPoseCoordinator PoseCoordinator;
             public int PoseBoneIndex = -1;
+            public ICharacterModel Character;
+            public ICharacterPosePipeline CharacterPosePipeline;
+            public ICharacterPatternController PatternController;
+            public ICharacterMouthController MouthController;
+            public ICharacterHandPoseController HandPoseController;
         }
 
         private readonly List<TrackBinding> bindings =
@@ -36,8 +49,14 @@ namespace BodyEditor.ReferenceModels
         private readonly Dictionary<CharacterPoseCoordinator, TimelinePoseModifier>
             poseModifiers =
                 new Dictionary<CharacterPoseCoordinator, TimelinePoseModifier>();
+        private readonly List<KoikatsuStudioItemPose> itemPoses =
+            new List<KoikatsuStudioItemPose>();
 
         private IReadOnlyList<ReferenceTimelineTrack> readOnlyTracks;
+        private IReadOnlyList<ICharacterModel> characterModels =
+            Array.Empty<ICharacterModel>();
+        private KoikatsuStudioNodeConstraints nodeConstraints;
+        private Func<ICharacterModel, int, int> resolveEyePattern;
         private float playbackSpeed = 1f;
         private bool loop;
 
@@ -86,7 +105,9 @@ namespace BodyEditor.ReferenceModels
         public static KoikatsuTimelinePlayer Attach(
             GameObject host,
             KoikatsuTimelineScene timeline,
-            IReadOnlyList<GameObject> objectsByTimelineIndex)
+            IReadOnlyList<GameObject> objectsByTimelineIndex,
+            IReadOnlyList<ICharacterModel> characterModels = null,
+            Func<ICharacterModel, int, int> eyePatternResolver = null)
         {
             if (host == null)
             {
@@ -104,7 +125,11 @@ namespace BodyEditor.ReferenceModels
             }
 
             var player = host.AddComponent<KoikatsuTimelinePlayer>();
-            player.Initialize(timeline, objectsByTimelineIndex);
+            player.Initialize(
+                timeline,
+                objectsByTimelineIndex,
+                characterModels ?? Array.Empty<ICharacterModel>(),
+                eyePatternResolver);
             return player;
         }
 
@@ -162,22 +187,29 @@ namespace BodyEditor.ReferenceModels
             bindings[trackIndex].Enabled = enabled;
             tracks[trackIndex].SetEnabled(enabled);
             var binding = bindings[trackIndex];
-            if (binding.PoseCoordinator != null)
-            {
-                binding.PoseCoordinator.EvaluateNow();
-            }
-            else if (enabled)
+            if (binding.PoseCoordinator == null && enabled)
             {
                 SampleBinding(binding, CurrentTime);
             }
+
+            EvaluatePosePipelines();
 
             StateChanged?.Invoke();
         }
 
         private void Initialize(
             KoikatsuTimelineScene timeline,
-            IReadOnlyList<GameObject> objectsByTimelineIndex)
+            IReadOnlyList<GameObject> objectsByTimelineIndex,
+            IReadOnlyList<ICharacterModel> characterModels,
+            Func<ICharacterModel, int, int> eyePatternResolver)
         {
+            resolveEyePattern = eyePatternResolver;
+            this.characterModels = characterModels ??
+                Array.Empty<ICharacterModel>();
+            nodeConstraints = GetComponent<KoikatsuStudioNodeConstraints>();
+            var importedItemPoses = GetComponentsInChildren<
+                KoikatsuStudioItemPose>(true);
+            itemPoses.AddRange(importedItemPoses);
             Duration = Mathf.Max(0f, timeline.Duration);
             playbackSpeed = Mathf.Clamp(
                 timeline.TimeScale <= 0f ? 1f : timeline.TimeScale,
@@ -186,7 +218,11 @@ namespace BodyEditor.ReferenceModels
 
             for (var index = 0; index < timeline.Tracks.Count; index++)
             {
-                AddBinding(index, timeline.Tracks[index], objectsByTimelineIndex);
+                AddBinding(
+                    index,
+                    timeline.Tracks[index],
+                    objectsByTimelineIndex,
+                    characterModels);
             }
 
             Sample(0f);
@@ -208,7 +244,8 @@ namespace BodyEditor.ReferenceModels
         private void AddBinding(
             int index,
             KoikatsuTimelineTrack source,
-            IReadOnlyList<GameObject> objectsByTimelineIndex)
+            IReadOnlyList<GameObject> objectsByTimelineIndex,
+            IReadOnlyList<ICharacterModel> characterModels)
         {
             var binding = new TrackBinding
             {
@@ -232,7 +269,19 @@ namespace BodyEditor.ReferenceModels
             {
                 status = "Track has no keyframes.";
             }
-            else if (!TryResolveTarget(
+            else if (IsCharacterChannel(binding.Channel) &&
+                     (!TryResolveCharacter(
+                          source,
+                          objectsByTimelineIndex,
+                          characterModels,
+                          out binding.Character,
+                          out status) ||
+                      !TryBindCharacterController(binding, out status)))
+            {
+                // Resolution provides the status shown by the timeline panel.
+            }
+            else if (!IsCharacterChannel(binding.Channel) &&
+                     !TryResolveTarget(
                          source,
                          objectsByTimelineIndex,
                          out binding.Target,
@@ -302,6 +351,29 @@ namespace BodyEditor.ReferenceModels
 
         private static Channel Classify(KoikatsuTimelineTrack source)
         {
+            if (string.Equals(source.Owner, "Timeline", StringComparison.Ordinal))
+            {
+                switch (source.Id)
+                {
+                    case "characterEyes":
+                        return Channel.EyesPattern;
+                    case "characterEyesOpen":
+                        return Channel.EyesOpenMax;
+                    case "characterEyebrows":
+                        return Channel.EyebrowPattern;
+                    case "characterEyebrowsOpen":
+                        return Channel.EyebrowOpenMax;
+                    case "characterMouth":
+                        return Channel.MouthPattern;
+                    case "characterMouthOpen":
+                        return Channel.MouthOpenRate;
+                    case "characterLeftHand":
+                        return Channel.LeftHandPose;
+                    case "characterRightHand":
+                        return Channel.RightHandPose;
+                }
+            }
+
             switch (source.Id)
             {
                 case "guideObjectPos":
@@ -340,9 +412,24 @@ namespace BodyEditor.ReferenceModels
                     return ReferenceTimelineTrackKind.Rotation;
                 case Channel.Scale:
                     return ReferenceTimelineTrackKind.Scale;
+                case Channel.EyesPattern:
+                case Channel.EyesOpenMax:
+                case Channel.EyebrowPattern:
+                case Channel.EyebrowOpenMax:
+                case Channel.MouthPattern:
+                case Channel.MouthOpenRate:
+                case Channel.LeftHandPose:
+                case Channel.RightHandPose:
+                    return ReferenceTimelineTrackKind.Value;
                 default:
                     return ReferenceTimelineTrackKind.Unsupported;
             }
+        }
+
+        private static bool IsCharacterChannel(Channel channel)
+        {
+            return channel >= Channel.EyesPattern &&
+                   channel <= Channel.RightHandPose;
         }
 
         private static string BuildTargetLabel(KoikatsuTimelineTrack source)
@@ -399,6 +486,103 @@ namespace BodyEditor.ReferenceModels
             }
 
             status = string.Empty;
+            return true;
+        }
+
+        private static bool TryResolveCharacter(
+            KoikatsuTimelineTrack source,
+            IReadOnlyList<GameObject> objectsByTimelineIndex,
+            IReadOnlyList<ICharacterModel> characterModels,
+            out ICharacterModel character,
+            out string status)
+        {
+            character = null;
+            if (!source.ObjectIndex.HasValue)
+            {
+                status = "Track has no scene object index.";
+                return false;
+            }
+
+            var objectIndex = source.ObjectIndex.Value;
+            if (objectIndex < 0 || objectIndex >= objectsByTimelineIndex.Count)
+            {
+                status = $"Scene object index {objectIndex} was not loaded " +
+                         $"(object count: {objectsByTimelineIndex.Count}).";
+                return false;
+            }
+
+            var targetObject = objectsByTimelineIndex[objectIndex];
+            if (targetObject == null)
+            {
+                status = $"Scene object index {objectIndex} has no loaded object.";
+                return false;
+            }
+
+            for (var index = 0; index < characterModels.Count; index++)
+            {
+                var candidate = characterModels[index];
+                var root = candidate?.Root;
+                if (root == null)
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(root, targetObject) ||
+                    root.transform.IsChildOf(targetObject.transform) ||
+                    targetObject.transform.IsChildOf(root.transform))
+                {
+                    character = candidate;
+                    status = string.Empty;
+                    return true;
+                }
+            }
+
+            status = $"Scene object index {objectIndex} is not a character.";
+            return false;
+        }
+
+        private static bool TryBindCharacterController(
+            TrackBinding binding,
+            out string status)
+        {
+            status = string.Empty;
+            var controls = binding.Character?.Controls;
+            if (controls == null)
+            {
+                status = "Character has no control interface.";
+                return false;
+            }
+
+            switch (binding.Channel)
+            {
+                case Channel.EyesPattern:
+                case Channel.EyesOpenMax:
+                    binding.PatternController = controls.Eyes?.Open;
+                    break;
+                case Channel.EyebrowPattern:
+                case Channel.EyebrowOpenMax:
+                    binding.PatternController = controls.Eyebrows;
+                    break;
+                case Channel.MouthPattern:
+                case Channel.MouthOpenRate:
+                    binding.MouthController = controls.Mouth;
+                    binding.PatternController = binding.MouthController;
+                    break;
+                case Channel.LeftHandPose:
+                case Channel.RightHandPose:
+                    binding.HandPoseController = controls.Hands;
+                    break;
+            }
+
+            binding.CharacterPosePipeline = controls.Pose?.Pipeline;
+
+            if (binding.PatternController == null &&
+                binding.HandPoseController == null)
+            {
+                status = "Character does not expose the requested control.";
+                return false;
+            }
+
             return true;
         }
 
@@ -501,9 +685,7 @@ namespace BodyEditor.ReferenceModels
             for (var index = 0; index < binding.Keyframes.Length; index++)
             {
                 binding.Keyframes[index] = binding.Source.Keyframes[index];
-                var valid = binding.Channel == Channel.Rotation
-                    ? binding.Keyframes[index].TryGetQuaternion("value", out _)
-                    : binding.Keyframes[index].TryGetVector3("value", out _);
+                var valid = HasCompatibleValue(binding, binding.Keyframes[index]);
                 if (!valid)
                 {
                     status = $"Keyframe {index} has no compatible value.";
@@ -548,6 +730,32 @@ namespace BodyEditor.ReferenceModels
             return true;
         }
 
+        private static bool HasCompatibleValue(
+            TrackBinding binding,
+            KoikatsuTimelineKeyframe keyframe)
+        {
+            switch (binding.Channel)
+            {
+                case Channel.Rotation:
+                    return keyframe.TryGetQuaternion("value", out _);
+                case Channel.Position:
+                case Channel.Scale:
+                    return keyframe.TryGetVector3("value", out _);
+                case Channel.EyesPattern:
+                case Channel.EyebrowPattern:
+                case Channel.MouthPattern:
+                case Channel.LeftHandPose:
+                case Channel.RightHandPose:
+                    return keyframe.TryGetInt("value", out _);
+                case Channel.EyesOpenMax:
+                case Channel.EyebrowOpenMax:
+                case Channel.MouthOpenRate:
+                    return keyframe.TryGetSingle("value", out _);
+                default:
+                    return false;
+            }
+        }
+
         private void Update()
         {
             if (!IsPlaying || Duration <= 0f)
@@ -581,13 +789,21 @@ namespace BodyEditor.ReferenceModels
             // Non-bone targets must update before the late pose coordinator uses
             // them as IK or controller targets.
             SampleDirectBindings(CurrentTime);
+            nodeConstraints?.EvaluateNow();
+            for (var index = 0; index < itemPoses.Count; index++)
+            {
+                if (itemPoses[index] != null)
+                {
+                    itemPoses[index].EvaluateAfterTimeline();
+                }
+            }
         }
 
         private void Sample(float time)
         {
             CurrentTime = Mathf.Clamp(time, 0f, Duration);
             SampleDirectBindings(CurrentTime);
-            EvaluatePoseCoordinators();
+            EvaluatePosePipelines();
         }
 
         private void SampleDirectBindings(float time)
@@ -602,26 +818,45 @@ namespace BodyEditor.ReferenceModels
             }
         }
 
-        private void EvaluatePoseCoordinators()
+        private void EvaluatePosePipelines()
         {
+            nodeConstraints?.EvaluateNow();
+            var evaluated = new HashSet<ICharacterPosePipeline>();
+
+            for (var index = 0; index < characterModels.Count; index++)
+            {
+                var pipeline = characterModels[index]?.Controls?.Pose?.Pipeline;
+                if (pipeline != null && evaluated.Add(pipeline))
+                {
+                    pipeline.EvaluateNow();
+                }
+            }
+
             foreach (var pair in poseModifiers)
             {
-                if (pair.Key != null)
+                if (pair.Key != null && evaluated.Add(pair.Key))
                 {
                     pair.Key.EvaluateNow();
                 }
             }
+
+            for (var index = 0; index < itemPoses.Count; index++)
+            {
+                if (itemPoses[index] != null)
+                {
+                    itemPoses[index].EvaluateNow();
+                }
+            }
         }
 
-        private static void SampleBinding(
+        private bool SampleBinding(
             TrackBinding binding,
             float time,
             CharacterPoseBuffer pose = null)
         {
-            if (binding.Target == null || binding.Keyframes == null ||
-                binding.Keyframes.Length == 0)
+            if (binding.Keyframes == null || binding.Keyframes.Length == 0)
             {
-                return;
+                return false;
             }
 
             FindSegment(binding.Keyframes, time, out var left, out var right);
@@ -635,6 +870,20 @@ namespace BodyEditor.ReferenceModels
                 {
                     factor = binding.Curves[left].Evaluate(factor);
                 }
+            }
+
+            if (IsCharacterChannel(binding.Channel))
+            {
+                return SampleCharacterBinding(
+                    binding,
+                    leftKey,
+                    rightKey,
+                    factor);
+            }
+
+            if (binding.Target == null)
+            {
+                return false;
             }
 
             if (binding.Channel == Channel.Rotation)
@@ -656,7 +905,7 @@ namespace BodyEditor.ReferenceModels
                     binding.Target.localRotation = rotationValue;
                 }
 
-                return;
+                return true;
             }
 
             leftKey.TryGetVector3("value", out var leftVector);
@@ -681,6 +930,149 @@ namespace BodyEditor.ReferenceModels
             {
                 binding.Target.localScale = value;
             }
+
+            return true;
+        }
+
+        private bool SampleCharacterBinding(
+            TrackBinding binding,
+            KoikatsuTimelineKeyframe leftKey,
+            KoikatsuTimelineKeyframe rightKey,
+            float factor)
+        {
+            switch (binding.Channel)
+            {
+                case Channel.EyesPattern:
+                    if (!leftKey.TryGetInt("value", out var eyeSetId))
+                    {
+                        return false;
+                    }
+
+                    return ApplyPattern(
+                        binding.PatternController,
+                        resolveEyePattern != null
+                            ? resolveEyePattern(binding.Character, eyeSetId)
+                            : eyeSetId);
+                case Channel.EyebrowPattern:
+                case Channel.MouthPattern:
+                    return leftKey.TryGetInt("value", out var pattern) &&
+                           ApplyPattern(binding.PatternController, pattern);
+                case Channel.EyesOpenMax:
+                case Channel.EyebrowOpenMax:
+                    return TrySampleFloat(
+                               leftKey,
+                               rightKey,
+                               factor,
+                               out var openMax) &&
+                           ApplyOpenMax(binding.PatternController, openMax);
+                case Channel.MouthOpenRate:
+                    return TrySampleFloat(
+                               leftKey,
+                               rightKey,
+                               factor,
+                               out var openRate) &&
+                           ApplyFixedOpenRate(
+                               binding.MouthController,
+                               openRate);
+                case Channel.LeftHandPose:
+                    return leftKey.TryGetInt("value", out var leftPose) &&
+                           ApplyHandPose(
+                               binding.HandPoseController,
+                               CharacterHand.Left,
+                               leftPose);
+                case Channel.RightHandPose:
+                    return leftKey.TryGetInt("value", out var rightPose) &&
+                           ApplyHandPose(
+                               binding.HandPoseController,
+                               CharacterHand.Right,
+                               rightPose);
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TrySampleFloat(
+            KoikatsuTimelineKeyframe leftKey,
+            KoikatsuTimelineKeyframe rightKey,
+            float factor,
+            out float value)
+        {
+            value = 0f;
+            if (!leftKey.TryGetSingle("value", out var leftValue) ||
+                !rightKey.TryGetSingle("value", out var rightValue))
+            {
+                return false;
+            }
+
+            value = Mathf.LerpUnclamped(leftValue, rightValue, factor);
+            return true;
+        }
+
+        private static bool ApplyPattern(
+            ICharacterPatternController controller,
+            int pattern)
+        {
+            if (controller == null || controller.PatternCount == 0)
+            {
+                return false;
+            }
+
+            controller.SetPattern(
+                Mathf.Clamp(pattern, 0, controller.PatternCount - 1),
+                false);
+            return true;
+        }
+
+        private static bool ApplyOpenMax(
+            ICharacterPatternController controller,
+            float value)
+        {
+            if (controller == null)
+            {
+                return false;
+            }
+
+            controller.SetOpenMax(value);
+            return true;
+        }
+
+        private static bool ApplyFixedOpenRate(
+            ICharacterMouthController controller,
+            float value)
+        {
+            if (controller == null)
+            {
+                return false;
+            }
+
+            controller.SetFixedOpenRate(value);
+            return true;
+        }
+
+        private static bool ApplyHandPose(
+            ICharacterHandPoseController controller,
+            CharacterHand hand,
+            int pose)
+        {
+            if (controller == null)
+            {
+                return false;
+            }
+
+            if (pose < 0)
+            {
+                controller.ClearPose(hand);
+                return true;
+            }
+
+            var poseCount = controller.GetPoseCount(hand);
+            if (poseCount == 0)
+            {
+                return false;
+            }
+
+            controller.SetPose(hand, Mathf.Clamp(pose, 0, poseCount - 1));
+            return true;
         }
 
         private static void FindSegment(
@@ -774,7 +1166,7 @@ namespace BodyEditor.ReferenceModels
                 {
                     if (poseBindings[index].Enabled)
                     {
-                        SampleBinding(
+                        owner.SampleBinding(
                             poseBindings[index],
                             owner.CurrentTime,
                             pose);

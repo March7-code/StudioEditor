@@ -35,7 +35,7 @@ namespace BodyEditor.Characters.Constraints
         IDisposable
     {
         private readonly ICharacterModel model;
-        private readonly CharacterPoseCoordinator coordinator;
+        private readonly ICharacterPosePipeline coordinator;
         private readonly BodyCollisionProfile profile;
         private readonly IReadOnlyList<LimbChain> limbs;
         private readonly List<CapsuleVolume> volumes =
@@ -50,7 +50,7 @@ namespace BodyEditor.Characters.Constraints
             this.model = model;
             this.profile = profile;
             this.limbs = limbs;
-            coordinator = model.PoseCoordinator;
+            coordinator = model.Controls.Pose.Pipeline;
             Settings = new CharacterBodyConstraintSettings();
             coordinator.RegisterModifier(this);
         }
@@ -69,8 +69,9 @@ namespace BodyEditor.Characters.Constraints
         {
             rig = null;
             if (model == null || model.Root == null ||
-                model.Skeleton == null || model.PoseCoordinator == null ||
-                !model.PoseCoordinator.IsInitialized ||
+                model.Skeleton == null ||
+                model.Controls?.Pose?.Pipeline == null ||
+                !model.Controls.Pose.Pipeline.IsInitialized ||
                 !BodyCollisionProfile.TryCreate(model, out var profile))
             {
                 return false;

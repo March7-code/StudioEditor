@@ -148,6 +148,10 @@ namespace BodyEditor.ReferenceModels
                     entry.AssetName,
                     instance,
                     appearance?.EnableDynamicBone ?? true);
+                KoikatsuStudioFinalIkMetadataLoader.Attach(
+                    bundleSource,
+                    entry.AssetName,
+                    instance);
                 var animator = instance.GetComponent<Animator>();
                 if (animator != null)
                 {
@@ -157,6 +161,11 @@ namespace BodyEditor.ReferenceModels
                         animator.speed = appearance.AnimeSpeed;
                     }
                 }
+
+                KoikatsuStudioItemPose.Attach(
+                    instance,
+                    animator,
+                    appearance);
 
                 var childRoot = FindByName(
                                     instance.transform,
@@ -279,6 +288,242 @@ namespace BodyEditor.ReferenceModels
             {
                 Object.DestroyImmediate(value);
             }
+        }
+    }
+
+    [DefaultExecutionOrder(31000)]
+    internal sealed class KoikatsuStudioItemPose : MonoBehaviour
+    {
+        private readonly struct FkOverride
+        {
+            public FkOverride(Transform target, Quaternion rotation)
+            {
+                Target = target;
+                Rotation = rotation;
+            }
+
+            public Transform Target { get; }
+
+            public Quaternion Rotation { get; }
+        }
+
+        private Animator animator;
+        private KoikatsuFinalIkComponent[] finalIk =
+            Array.Empty<KoikatsuFinalIkComponent>();
+        private bool[] activeFinalIk = Array.Empty<bool>();
+        private FkOverride[] fkOverrides = Array.Empty<FkOverride>();
+        private bool fkEnabled;
+        private int timelineEvaluationFrame = -1;
+
+        internal static KoikatsuStudioItemPose Attach(
+            GameObject root,
+            Animator animator,
+            KoikatsuSceneItem source)
+        {
+            if (root == null || source == null)
+            {
+                return null;
+            }
+
+            var finalIk =
+                KoikatsuFinalIkRuntime.GetComponentsInChildren(root);
+            var fkOverrides = BuildFkOverrides(root.transform, source.Bones);
+            if (animator == null && finalIk.Length == 0 &&
+                fkOverrides.Length == 0)
+            {
+                return null;
+            }
+
+            var pose = root.AddComponent<KoikatsuStudioItemPose>();
+            pose.Initialize(
+                animator,
+                source,
+                finalIk,
+                fkOverrides);
+            return pose;
+        }
+
+        internal void EvaluateNow()
+        {
+            FixFinalIkTransforms();
+            ApplyFk();
+            SolveFinalIk();
+        }
+
+        internal void EvaluateAfterTimeline()
+        {
+            EvaluateNow();
+            timelineEvaluationFrame = Time.frameCount;
+        }
+
+        internal void SuppressFkPhysics()
+        {
+            if (!fkEnabled)
+            {
+                return;
+            }
+
+            var springs = GetComponentsInChildren<KoikatsuSpringBone>(true);
+            for (var index = 0; index < springs.Length; index++)
+            {
+                springs[index].SetSimulationEnabled(false);
+            }
+
+            var ver02 = GetComponentsInChildren<KoikatsuVer02SpringBone>(true);
+            for (var index = 0; index < ver02.Length; index++)
+            {
+                ver02[index].SetSimulationEnabled(false);
+            }
+        }
+
+        private void Initialize(
+            Animator itemAnimator,
+            KoikatsuSceneItem source,
+            KoikatsuFinalIkComponent[] itemFinalIk,
+            FkOverride[] itemFkOverrides)
+        {
+            animator = itemAnimator;
+            finalIk = itemFinalIk ?? Array.Empty<KoikatsuFinalIkComponent>();
+            activeFinalIk = new bool[finalIk.Length];
+            fkOverrides = itemFkOverrides ?? Array.Empty<FkOverride>();
+            fkEnabled = source.EnableFK && fkOverrides.Length != 0;
+
+            RestoreAnimationTime(source.AnimeNormalizedTime);
+            for (var index = 0; index < finalIk.Length; index++)
+            {
+                var component = finalIk[index];
+                activeFinalIk[index] = component != null &&
+                                       component.IsAlive &&
+                                       component.Enabled;
+                if (activeFinalIk[index])
+                {
+                    component.Enabled = false;
+                }
+            }
+
+            SuppressFkPhysics();
+            EvaluateNow();
+        }
+
+        private void RestoreAnimationTime(float normalizedTime)
+        {
+            if (animator == null || !animator.enabled ||
+                animator.runtimeAnimatorController == null ||
+                animator.layerCount == 0)
+            {
+                return;
+            }
+
+            if (Mathf.Approximately(normalizedTime, 0f))
+            {
+                animator.Update(0f);
+                return;
+            }
+
+            // Studio first enters the controller so it can discover the active
+            // state, then seeks that state to the time saved in OIItemInfo.
+            animator.Update(1f);
+            var state = animator.GetCurrentAnimatorStateInfo(0);
+            animator.Play(state.shortNameHash, 0, normalizedTime);
+            animator.Update(0f);
+        }
+
+        private void LateUpdate()
+        {
+            if (timelineEvaluationFrame != Time.frameCount)
+            {
+                EvaluateNow();
+            }
+        }
+
+        private void SolveFinalIk()
+        {
+            for (var index = 0; index < finalIk.Length; index++)
+            {
+                var component = finalIk[index];
+                if (!activeFinalIk[index] || component == null ||
+                    !component.IsAlive)
+                {
+                    continue;
+                }
+
+                if (!component.SolverInitiated)
+                {
+                    component.Initiate();
+                }
+
+                if (component.SolverInitiated)
+                {
+                    component.UpdateSolver();
+                }
+            }
+        }
+
+        private void FixFinalIkTransforms()
+        {
+            for (var index = 0; index < finalIk.Length; index++)
+            {
+                var component = finalIk[index];
+                if (!activeFinalIk[index] || component == null ||
+                    !component.IsAlive || !component.FixTransforms ||
+                    !component.SolverInitiated)
+                {
+                    continue;
+                }
+
+                component.FixSolverTransforms();
+            }
+        }
+
+        private void ApplyFk()
+        {
+            if (!fkEnabled)
+            {
+                return;
+            }
+
+            for (var index = 0; index < fkOverrides.Length; index++)
+            {
+                var target = fkOverrides[index].Target;
+                if (target != null)
+                {
+                    target.localRotation = fkOverrides[index].Rotation;
+                }
+            }
+        }
+
+        private static FkOverride[] BuildFkOverrides(
+            Transform root,
+            IReadOnlyDictionary<string, KoikatsuSceneBone> bones)
+        {
+            if (root == null || bones == null || bones.Count == 0)
+            {
+                return Array.Empty<FkOverride>();
+            }
+
+            var transforms = root.GetComponentsInChildren<Transform>(true);
+            var transformsByName = new Dictionary<string, Transform>(
+                StringComparer.Ordinal);
+            for (var index = 0; index < transforms.Length; index++)
+            {
+                if (!transformsByName.ContainsKey(transforms[index].name))
+                {
+                    transformsByName.Add(transforms[index].name, transforms[index]);
+                }
+            }
+
+            var result = new List<FkOverride>(bones.Count);
+            foreach (var pair in bones)
+            {
+                if (transformsByName.TryGetValue(pair.Key, out var target))
+                {
+                    result.Add(new FkOverride(
+                        target,
+                        Quaternion.Euler(pair.Value.Rotation)));
+                }
+            }
+
+            return result.ToArray();
         }
     }
 

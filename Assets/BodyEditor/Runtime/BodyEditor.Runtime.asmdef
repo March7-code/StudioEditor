@@ -2,7 +2,8 @@
   "name": "BodyEditor.Runtime",
   "rootNamespace": "BodyEditor",
   "references": [
-    "BodyEditor.Characters"
+    "BodyEditor.Characters",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

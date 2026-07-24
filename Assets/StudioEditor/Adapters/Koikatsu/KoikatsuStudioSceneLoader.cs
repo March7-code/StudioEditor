@@ -275,20 +275,80 @@ namespace StudioEditor.ReferenceModels
                 objectsByKey.Add(source.Base.DicKey, loadedObject);
             }
 
-            for (var index = 0; index < source.Children.Count; index++)
+            if (source.Character != null &&
+                source.Character.ChildGroups != null &&
+                source.Character.ChildGroups.Count != 0)
             {
-                LoadObject(
-                    scene,
-                    source.Children[index],
-                    abdataRoot,
-                    modsRoot,
-                    childParent,
-                    items,
-                    characters,
-                    characterSources,
-                    missing,
-                    objectsByKey);
+                var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
+                foreach (var group in source.Character.ChildGroups)
+                {
+                    var groupParent = ResolveCharacterChildParent(
+                        loadedObject.transform,
+                        group.Key,
+                        catalog) ?? childParent;
+                    for (var index = 0; index < group.Value.Count; index++)
+                    {
+                        LoadObject(
+                            scene,
+                            group.Value[index],
+                            abdataRoot,
+                            modsRoot,
+                            groupParent,
+                            items,
+                            characters,
+                            characterSources,
+                            missing,
+                            objectsByKey);
+                    }
+                }
             }
+            else
+            {
+                for (var index = 0; index < source.Children.Count; index++)
+                {
+                    LoadObject(
+                        scene,
+                        source.Children[index],
+                        abdataRoot,
+                        modsRoot,
+                        childParent,
+                        items,
+                        characters,
+                        characterSources,
+                        missing,
+                        objectsByKey);
+                }
+            }
+        }
+
+        internal static Transform ResolveCharacterChildParent(
+            Transform characterRoot,
+            int group,
+            KoikatsuListCatalog catalog)
+        {
+            if (characterRoot == null || catalog == null ||
+                !catalog.TryGetStudioAccessoryPoint(group, out var referenceKey) ||
+                string.IsNullOrWhiteSpace(referenceKey))
+            {
+                return null;
+            }
+
+            var transforms = characterRoot.GetComponentsInChildren<Transform>(true);
+            for (var index = 0; index < transforms.Length; index++)
+            {
+                if (string.Equals(
+                        transforms[index].name,
+                        referenceKey,
+                        StringComparison.Ordinal))
+                {
+                    return transforms[index];
+                }
+            }
+
+            Debug.LogWarning(
+                $"Koikatsu character accessory point {group} references " +
+                $"missing transform '{referenceKey}'.");
+            return null;
         }
 
         private static bool IsMissingCharacterFailure(Exception exception)
@@ -978,14 +1038,41 @@ namespace StudioEditor.ReferenceModels
                 throw;
             }
 
-            for (var index = 0; index < source.Children.Count; index++)
+            var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
+            if (source.Character.ChildGroups != null &&
+                source.Character.ChildGroups.Count != 0)
             {
-                if (TryGetObject(
-                        source.Children[index].Base.DicKey,
-                        out var child) &&
-                    child != null && child.transform.IsChildOf(oldTransform))
+                foreach (var group in source.Character.ChildGroups)
                 {
-                    child.transform.SetParent(newTransform, false);
+                    var groupParent = KoikatsuStudioSceneLoader
+                        .ResolveCharacterChildParent(
+                        newTransform,
+                        group.Key,
+                        catalog) ?? newTransform;
+                    for (var index = 0; index < group.Value.Count; index++)
+                    {
+                        if (TryGetObject(
+                                group.Value[index].Base.DicKey,
+                                out var child) &&
+                            child != null &&
+                            child.transform.IsChildOf(oldTransform))
+                        {
+                            child.transform.SetParent(groupParent, false);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (var index = 0; index < source.Children.Count; index++)
+                {
+                    if (TryGetObject(
+                            source.Children[index].Base.DicKey,
+                            out var child) &&
+                        child != null && child.transform.IsChildOf(oldTransform))
+                    {
+                        child.transform.SetParent(newTransform, false);
+                    }
                 }
             }
 

@@ -46,6 +46,7 @@ namespace StudioEditor.UI
             root.AddComponent<CharacterControlPointController>();
             root.AddComponent<CharacterBodyConstraintController>();
             root.AddComponent<TimelineCaptureController>();
+            root.AddComponent<ScreenshotCaptureController>();
             root.AddComponent<SceneTimelineController>();
 
             var lifetime = root.AddComponent<StudioEditorRuntimeLifetime>();

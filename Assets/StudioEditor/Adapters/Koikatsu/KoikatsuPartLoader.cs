@@ -281,6 +281,28 @@ namespace StudioEditor.ReferenceModels
 
         public KoikatsuBakedClothesTextures BakedClothesTextures { get; set; }
 
+        public Texture2D ClothesEmblem01 { get; set; }
+
+        public Texture2D ClothesEmblem02 { get; set; }
+
+        public Texture2D ClothesAlphaMask { get; set; }
+
+        public Vector2 ClothesAlphaMaskScale { get; set; } = Vector2.one;
+
+        public Vector2 ClothesAlphaMaskOffset { get; set; } = Vector2.zero;
+
+        public bool ClothesAlphaMaskUseRedChannel { get; set; } = true;
+
+        public bool ClothesAlphaMaskUseGreenChannel { get; set; } = true;
+
+        public ICollection<Texture2D> RuntimeTextures { get; set; }
+
+        public bool ShowClothesOption01 { get; set; } = true;
+
+        public bool ShowClothesOption02 { get; set; } = true;
+
+        public int ClothesSleevesType { get; set; } = -1;
+
         public bool PhysicsAllowed
         {
             get
@@ -565,6 +587,10 @@ namespace StudioEditor.ReferenceModels
                         runtimeMaterials);
                 }
 
+                clothesRendererMap?.ApplyEmblems(
+                    options.ClothesEmblem01,
+                    options.ClothesEmblem02);
+
                 // A baked map may have replaced MainTex during conversion;
                 // MaterialEditor overrides are the final source of truth.
                 options.TextureLoader?.ApplyMaterialEditorProperties(
@@ -572,6 +598,18 @@ namespace StudioEditor.ReferenceModels
                     options.MaterialEditorObjectType,
                     options.MaterialEditorCoordinateIndex,
                     options.MaterialEditorSlot);
+                KoikatsuMaterialConverter.ApplyClothesAlphaMask(
+                    instance,
+                    options.ClothesAlphaMask,
+                    options.ClothesAlphaMaskScale,
+                    options.ClothesAlphaMaskOffset,
+                    options.ClothesAlphaMaskUseRedChannel,
+                    options.ClothesAlphaMaskUseGreenChannel,
+                    options.RuntimeTextures);
+                clothesRendererMap?.ApplyOptions(
+                    options.ShowClothesOption01,
+                    options.ShowClothesOption02);
+                clothesRendererMap?.ApplySleeves(options.ClothesSleevesType);
 
                 KoikatsuSpringBoneMetadataLoader.Attach(
                     loadedSource,

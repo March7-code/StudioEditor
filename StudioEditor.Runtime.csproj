@@ -69,11 +69,13 @@
     <Compile Include="Assets\StudioEditor\Runtime\UI\ReferenceModelSidebar.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\UI\StudioEditorSidebar.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\ReferenceModels\ReferenceModelOverlays.cs" />
+    <Compile Include="Assets\StudioEditor\Runtime\UI\ScreenshotCapturePanel.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\ReferenceModels\ReferenceModelAdapterRegistry.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\Editing\EditableSkeletonController.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\HumanoidSkeletonFactory.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\ReferenceModels\BodySectionField.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\Editing\CharacterControlPointController.cs" />
+    <Compile Include="Assets\StudioEditor\Runtime\UI\ScreenshotCaptureController.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\UI\ViewportAxisGizmo.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\UI\SceneTimelineController.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\Editing\CharacterBodyConstraintController.cs" />

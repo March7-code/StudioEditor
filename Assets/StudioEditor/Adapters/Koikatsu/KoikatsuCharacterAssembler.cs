@@ -370,6 +370,8 @@ namespace StudioEditor.ReferenceModels
                     bodyTexture = KoikatsuBodyMaskBaker.Bake(
                         bodyTexture,
                         clothesLoadResult.BodyAlphaMask,
+                        clothesLoadResult.UseBodyMaskRedChannel,
+                        clothesLoadResult.UseBodyMaskGreenChannel,
                         runtimeTextures);
                     bodyTexture = KoikatsuOverlayTextureBaker.Composite(
                         bodyTexture,
@@ -416,7 +418,8 @@ namespace StudioEditor.ReferenceModels
                         card.Face,
                         textureLoader,
                         coordinateIndex,
-                        runtimeTextures);
+                        runtimeTextures,
+                        card.Status?.HideEyesHighlight == true);
                     var faceTextures = LoadFaceTextures(
                         card,
                         textureLoader);
@@ -772,6 +775,9 @@ namespace StudioEditor.ReferenceModels
                 leases,
                 runtimeMaterials);
             var topPart = GetClothesPart(coordinate, 0);
+            var topState = GetClothesState(card.Status, 0);
+            var useMaskRedChannel = topState == 0;
+            var useMaskGreenChannel = topState != 3;
             var topProperty =
                 $"outfit{coordinateIndex}.ChaFileClothes.{ClothesProperties[0]}";
             catalog.TryGet(
@@ -797,10 +803,39 @@ namespace StudioEditor.ReferenceModels
                 "OverBodyMaskAB",
                 "OverBodyMask",
                 topProperty);
+            var braAlphaMask = textureLoader.LoadCatalogTexture(
+                105,
+                topPart.Id,
+                "OverBraMaskAB",
+                "OverBraMask",
+                topProperty);
+            var topPartMasks = ResolveTopPartMasks(
+                coordinate,
+                topEntry,
+                textureLoader,
+                coordinateIndex);
+            if (topPartMasks.OverridesBaseMasks)
+            {
+                bodyAlphaMask = topPartMasks.BodyAlphaMask;
+                braAlphaMask = topPartMasks.BraAlphaMask;
+            }
+
+            var topEmblem01 = LoadEmblemTexture(
+                topPart,
+                topProperty,
+                textureLoader,
+                0);
+            var topEmblem02 = LoadEmblemTexture(
+                topPart,
+                topProperty,
+                textureLoader,
+                1);
             var coversGroin = suppressBottom || suppressShorts;
             loadResult = new KoikatsuClothesLoadResult(
-                bodyAlphaMask,
-                coversGroin);
+                useMaskGreenChannel ? bodyAlphaMask : null,
+                coversGroin,
+                useMaskRedChannel,
+                useMaskGreenChannel);
 
             GameObject topObject = null;
             GameObject innerShoes = null;
@@ -829,6 +864,16 @@ namespace StudioEditor.ReferenceModels
                     0,
                     textureLoader,
                     runtimeTextures);
+                var emblem01 = LoadEmblemTexture(
+                    part,
+                    property,
+                    textureLoader,
+                    0);
+                var emblem02 = LoadEmblemTexture(
+                    part,
+                    property,
+                    textureLoader,
+                    1);
                 var instance = loader.Load(
                     new KoikatsuAssetRequest(
                         ClothesCategories[index],
@@ -846,17 +891,47 @@ namespace StudioEditor.ReferenceModels
                         Textures = textures,
                         BakedClothesTextures = bakedTextures,
                         TextureLoader = textureLoader,
+                        ClothesEmblem01 = emblem01,
+                        ClothesEmblem02 = emblem02,
+                        ClothesAlphaMask = index == 2 && useMaskGreenChannel
+                            ? braAlphaMask
+                            : null,
+                        ClothesAlphaMaskUseRedChannel = useMaskRedChannel,
+                        ClothesAlphaMaskUseGreenChannel = useMaskGreenChannel,
+                        ClothesAlphaMaskScale = index == 2
+                            ? GetBraMaskScale(braEntry).Scale
+                            : Vector2.one,
+                        ClothesAlphaMaskOffset = index == 2
+                            ? GetBraMaskScale(braEntry).Offset
+                            : Vector2.zero,
+                        RuntimeTextures = runtimeTextures,
+                        ShowClothesOption01 = IsClothesOptionVisible(
+                            coordinate,
+                            index,
+                            part,
+                            0),
+                        ShowClothesOption02 = IsClothesOptionVisible(
+                            coordinate,
+                            index,
+                            part,
+                            1),
+                        ClothesSleevesType = index == 0
+                            ? part.SleevesType
+                            : -1,
                         MaterialEditorObjectType = 1,
                         MaterialEditorCoordinateIndex = coordinateIndex,
                         MaterialEditorSlot = index,
                     });
-                ApplyWornClothesState(instance);
+                ApplyWornClothesState(instance, index, card.Status);
                 if (index == 1 || index == 3)
                 {
-                    coversGroin |= instance != null;
+                    coversGroin |= instance != null &&
+                                   GetClothesState(card.Status, index) == 0;
                     loadResult = new KoikatsuClothesLoadResult(
-                        bodyAlphaMask,
-                        coversGroin);
+                        useMaskGreenChannel ? bodyAlphaMask : null,
+                        coversGroin,
+                        useMaskRedChannel,
+                        useMaskGreenChannel);
                 }
 
                 if (index == 0)
@@ -891,20 +966,125 @@ namespace StudioEditor.ReferenceModels
                 textureLoader,
                 runtimeTextures,
                 coordinateIndex,
-                cancellationToken);
+                cancellationToken,
+                topPartMasks.InnerAlphaMask,
+                topEmblem01,
+                topEmblem02,
+                topState,
+                useMaskRedChannel,
+                useMaskGreenChannel);
             if (topPartsBodyMask != null)
             {
                 bodyAlphaMask = topPartsBodyMask;
                 loadResult = new KoikatsuClothesLoadResult(
-                    bodyAlphaMask,
-                    coversGroin);
+                    useMaskGreenChannel ? bodyAlphaMask : null,
+                    coversGroin,
+                    useMaskRedChannel,
+                    useMaskGreenChannel);
             }
 
-            if (innerShoes != null && outerShoes != null)
+            ApplyShoesType(innerShoes, outerShoes, card.Status?.ShoesType ?? 0);
+
+        }
+
+        private static KoikatsuTopPartMasks ResolveTopPartMasks(
+            KoikatsuCardCoordinate coordinate,
+            KoikatsuListEntry topEntry,
+            KoikatsuTextureLoader textureLoader,
+            int coordinateIndex)
+        {
+            if (topEntry == null ||
+                !int.TryParse(topEntry.Get("Kind"), out var topType) ||
+                (topType != 1 && topType != 2))
             {
-                innerShoes.SetActive(false);
+                return default(KoikatsuTopPartMasks);
             }
 
+            var categoryBase = topType == 1 ? 200 : 210;
+            var defaults = topType == 1
+                ? new[] { 0, 0, 1 }
+                : new[] { 0, 1, 1 };
+            var names = topType == 1
+                ? new[]
+                {
+                    "ClothesJacketSubA",
+                    "ClothesJacketSubB",
+                }
+                : new[]
+                {
+                    "ClothesSailorSubA",
+                    "ClothesSailorSubB",
+                };
+            var ids = new int[2];
+            var properties = new string[2];
+            for (var index = 0; index < ids.Length; index++)
+            {
+                ids[index] = index < coordinate.SubPartsIds.Count
+                    ? coordinate.SubPartsIds[index]
+                    : defaults[index];
+                properties[index] =
+                    $"outfit{coordinateIndex}.ChaFileClothes.{names[index]}";
+            }
+
+            return new KoikatsuTopPartMasks(
+                true,
+                textureLoader.LoadCatalogTexture(
+                    categoryBase,
+                    ids[0],
+                    "OverBodyMaskAB",
+                    "OverBodyMask",
+                    properties[0]),
+                textureLoader.LoadCatalogTexture(
+                    categoryBase,
+                    ids[0],
+                    "OverBraMaskAB",
+                    "OverBraMask",
+                    properties[0]),
+                textureLoader.LoadCatalogTexture(
+                    categoryBase + 1,
+                    ids[1],
+                    "OverInnerMaskAB",
+                    "OverInnerMask",
+                    properties[1]));
+        }
+
+        private static Texture2D LoadEmblemTexture(
+            KoikatsuCardClothesPart part,
+            string property,
+            KoikatsuTextureLoader textureLoader,
+            int index)
+        {
+            if (part == null)
+            {
+                return null;
+            }
+
+            var id = index == 0 ? part.EmblemId : part.EmblemId2;
+            return textureLoader.LoadCatalogTexture(
+                431,
+                id,
+                "MainTexAB",
+                "MainTex",
+                property + (index == 0
+                    ? ".emblemeId"
+                    : ".emblemeId2"));
+        }
+
+        private static KoikatsuMaskTransform GetBraMaskScale(
+            KoikatsuListEntry braEntry)
+        {
+            var useSecondAtlasHalf = braEntry?.Get("Coordinate") == "2";
+            var mabUv = braEntry?.Get("MabUV");
+            if (!string.IsNullOrEmpty(mabUv))
+            {
+                useSecondAtlasHalf = mabUv == "1";
+            }
+
+            return useSecondAtlasHalf
+                ? new KoikatsuMaskTransform(
+                    new Vector2(1f, 2f),
+                    new Vector2(0f, -1f))
+                : new KoikatsuMaskTransform(Vector2.one, Vector2.zero);
         }
 
         private static Texture2D LoadTopParts(
@@ -919,7 +1099,13 @@ namespace StudioEditor.ReferenceModels
             KoikatsuTextureLoader textureLoader,
             List<Texture2D> runtimeTextures,
             int coordinateIndex,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Texture2D innerAlphaMask,
+            Texture2D emblem01,
+            Texture2D emblem02,
+            byte topState,
+            bool useMaskRedChannel,
+            bool useMaskGreenChannel)
         {
             if (topEntry == null ||
                 !int.TryParse(topEntry.Get("Kind"), out var topType) ||
@@ -998,11 +1184,19 @@ namespace StudioEditor.ReferenceModels
                         Textures = textures,
                         BakedClothesTextures = bakedTextures,
                         TextureLoader = textureLoader,
+                        ClothesEmblem01 = emblem01,
+                        ClothesEmblem02 = emblem02,
+                        ClothesAlphaMask = index == 0 && useMaskGreenChannel
+                            ? innerAlphaMask
+                            : null,
+                        ClothesAlphaMaskUseRedChannel = useMaskRedChannel,
+                        ClothesAlphaMaskUseGreenChannel = useMaskGreenChannel,
+                        RuntimeTextures = runtimeTextures,
                         MaterialEditorObjectType = 1,
                         MaterialEditorCoordinateIndex = coordinateIndex,
                         MaterialEditorSlot = topType == 1 ? 0 : 2,
                     });
-                ApplyWornClothesState(instance);
+                ApplyTopPartState(instance, topState);
             }
 
             return bodyAlphaMask;
@@ -1024,33 +1218,196 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
-        private static void ApplyWornClothesState(GameObject instance)
+        private static void ApplyWornClothesState(
+            GameObject instance,
+            int clothesIndex,
+            KoikatsuCardStatus status)
         {
             if (instance == null)
             {
                 return;
             }
 
+            var state = GetClothesState(status, clothesIndex);
+            var topState = GetClothesState(status, 0);
+            var bottomState = GetClothesState(status, 1);
+            var braState = GetClothesState(status, 2);
+            var shortsState = GetClothesState(status, 3);
+            switch (clothesIndex)
+            {
+                case 0:
+                case 1:
+                case 2:
+                case 3:
+                    instance.SetActive(state != 3);
+                    break;
+                case 5:
+                    instance.SetActive(state != 2 && state != 3);
+                    break;
+                default:
+                    instance.SetActive(state == 0);
+                    break;
+            }
+
+            var transforms = instance.GetComponentsInChildren<Transform>(true);
+            for (var index = 0; index < transforms.Length; index++)
+            {
+                bool? active = null;
+                switch (clothesIndex)
+                {
+                    case 0:
+                        switch (transforms[index].name)
+                        {
+                            case "n_top_a": active = topState == 0; break;
+                            case "n_top_b": active = topState == 1; break;
+                            case "n_top_c": active = false; break;
+                            case "n_bot_a":
+                                active = bottomState == 0 && topState != 3;
+                                break;
+                            case "n_bot_b":
+                                active = bottomState != 0 && topState != 3;
+                                break;
+                            case "n_bot_c": active = false; break;
+                        }
+                        break;
+                    case 1:
+                        switch (transforms[index].name)
+                        {
+                            case "n_top_a":
+                                active = topState == 0 && bottomState != 2;
+                                break;
+                            case "n_top_b":
+                                active = topState != 0 && bottomState != 2;
+                                break;
+                            case "n_top_c": active = false; break;
+                            case "n_bot_a": active = bottomState == 0; break;
+                            case "n_bot_b": active = bottomState == 1; break;
+                            case "n_bot_c": active = false; break;
+                        }
+                        break;
+                    case 2:
+                        switch (transforms[index].name)
+                        {
+                            case "n_top_a": active = braState == 0; break;
+                            case "n_top_b": active = braState == 1; break;
+                            case "n_top_c": active = false; break;
+                            case "n_bot_a":
+                                active = shortsState == 0 && braState != 3;
+                                break;
+                            case "n_bot_b":
+                                active = shortsState != 0 && braState != 3;
+                                break;
+                            case "n_bot_c": active = false; break;
+                        }
+                        break;
+                    case 3:
+                        switch (transforms[index].name)
+                        {
+                            case "n_bot_a": active = shortsState == 0; break;
+                            case "n_bot_b": active = shortsState == 1; break;
+                            case "n_bot_c": active = shortsState == 2; break;
+                            case "n_top_a":
+                            case "n_top_b":
+                            case "n_top_c":
+                                active = false;
+                                break;
+                        }
+                        break;
+                    case 5:
+                        switch (transforms[index].name)
+                        {
+                            case "n_panst_a": active = state == 0; break;
+                            case "n_panst_b": active = state == 1; break;
+                            case "n_panst_c": active = false; break;
+                        }
+                        break;
+                }
+
+                if (active.HasValue)
+                {
+                    transforms[index].gameObject.SetActive(active.Value);
+                }
+            }
+        }
+
+        private static void ApplyTopPartState(GameObject instance, byte state)
+        {
+            if (instance == null)
+            {
+                return;
+            }
+
+            instance.SetActive(state != 3);
             var transforms = instance.GetComponentsInChildren<Transform>(true);
             for (var index = 0; index < transforms.Length; index++)
             {
                 switch (transforms[index].name)
                 {
                     case "n_top_a":
-                    case "n_bot_a":
-                    case "n_panst_a":
-                        transforms[index].gameObject.SetActive(true);
+                        transforms[index].gameObject.SetActive(state == 0);
                         break;
                     case "n_top_b":
+                        transforms[index].gameObject.SetActive(state == 1);
+                        break;
                     case "n_top_c":
-                    case "n_bot_b":
-                    case "n_bot_c":
-                    case "n_panst_b":
-                    case "n_panst_c":
                         transforms[index].gameObject.SetActive(false);
                         break;
                 }
             }
+        }
+
+        private static void ApplyShoesType(
+            GameObject innerShoes,
+            GameObject outerShoes,
+            byte shoesType)
+        {
+            if (innerShoes != null)
+            {
+                innerShoes.SetActive(innerShoes.activeSelf && shoesType == 0);
+            }
+
+            if (outerShoes != null)
+            {
+                outerShoes.SetActive(outerShoes.activeSelf && shoesType == 1);
+            }
+        }
+
+        private static byte GetClothesState(
+            KoikatsuCardStatus status,
+            int clothesIndex)
+        {
+            var states = status?.ClothesStates;
+            if (states == null || clothesIndex < 0 ||
+                clothesIndex >= states.Count || states[clothesIndex] > 3)
+            {
+                return 0;
+            }
+
+            return states[clothesIndex];
+        }
+
+        private static bool IsClothesOptionVisible(
+            KoikatsuCardCoordinate coordinate,
+            int clothesIndex,
+            KoikatsuCardClothesPart part,
+            int optionIndex)
+        {
+            IReadOnlyList<bool> hidden;
+            switch (clothesIndex)
+            {
+                case 2:
+                    hidden = coordinate?.HideBraOptions;
+                    break;
+                case 3:
+                    hidden = coordinate?.HideShortsOptions;
+                    break;
+                default:
+                    hidden = part?.HideOptions;
+                    break;
+            }
+
+            return hidden == null || optionIndex < 0 ||
+                   optionIndex >= hidden.Count || !hidden[optionIndex];
         }
 
         private static void LoadAccessories(
@@ -1139,6 +1496,11 @@ namespace StudioEditor.ReferenceModels
                     });
                 if (instance != null)
                 {
+                    var showAccessories = card.Status?.ShowAccessories;
+                    var visible = showAccessories == null ||
+                                  slot >= showAccessories.Count ||
+                                  showAccessories[slot];
+                    instance.SetActive(visible);
                     ApplyAccessoryMoves(
                         instance.transform,
                         accessory.AdditionalMoves,
@@ -1447,15 +1809,59 @@ namespace StudioEditor.ReferenceModels
         {
             public KoikatsuClothesLoadResult(
                 Texture2D bodyAlphaMask,
-                bool coversGroin)
+                bool coversGroin,
+                bool useBodyMaskRedChannel,
+                bool useBodyMaskGreenChannel)
             {
                 BodyAlphaMask = bodyAlphaMask;
                 CoversGroin = coversGroin;
+                UseBodyMaskRedChannel = useBodyMaskRedChannel;
+                UseBodyMaskGreenChannel = useBodyMaskGreenChannel;
             }
 
             public Texture2D BodyAlphaMask { get; }
 
             public bool CoversGroin { get; }
+
+            public bool UseBodyMaskRedChannel { get; }
+
+            public bool UseBodyMaskGreenChannel { get; }
+        }
+
+        private readonly struct KoikatsuTopPartMasks
+        {
+            public KoikatsuTopPartMasks(
+                bool overridesBaseMasks,
+                Texture2D bodyAlphaMask,
+                Texture2D braAlphaMask,
+                Texture2D innerAlphaMask)
+            {
+                OverridesBaseMasks = overridesBaseMasks;
+                BodyAlphaMask = bodyAlphaMask;
+                BraAlphaMask = braAlphaMask;
+                InnerAlphaMask = innerAlphaMask;
+            }
+
+            public bool OverridesBaseMasks { get; }
+
+            public Texture2D BodyAlphaMask { get; }
+
+            public Texture2D BraAlphaMask { get; }
+
+            public Texture2D InnerAlphaMask { get; }
+        }
+
+        private readonly struct KoikatsuMaskTransform
+        {
+            public KoikatsuMaskTransform(Vector2 scale, Vector2 offset)
+            {
+                Scale = scale;
+                Offset = offset;
+            }
+
+            public Vector2 Scale { get; }
+
+            public Vector2 Offset { get; }
         }
     }
 

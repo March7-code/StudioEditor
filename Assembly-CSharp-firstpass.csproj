@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
   <!-- Generated file, do not modify, your changes will be overwritten (use AssetPostprocessor.OnGeneratedCSProject) -->
   <PropertyGroup>
     <BaseIntermediateOutputPath>Temp\obj\$(MSBuildProjectName)</BaseIntermediateOutputPath>
@@ -83,8 +83,8 @@
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\Tools\HitReactionVRIK.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\Aim IK\Scripts\SecondHandOnGun.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\FBBIK\Scripts\ExplosionDemo.cs" />
-    <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\VRIK\Scripts\VRIKArmMocap.cs" />
     <Compile Include="Assets\Plugins\RootMotion\Shared Demo Assets\Scripts\Character Controllers\UserControlAI.cs" />
+    <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\VRIK\Scripts\VRIKArmMocap.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\Tools\OffsetPose.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\Tools\ShoulderRotator.cs" />
     <Compile Include="Assets\Plugins\RootMotion\Baker\Scripts\Animation Modifiers\AnimationModifierStack.cs" />
@@ -198,9 +198,9 @@
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\FBBIK\Scripts\TouchWalls.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\Grounder\Grounding.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\IK Solvers\IKSolverFullBodyBiped.cs" />
+    <Compile Include="Assets\Plugins\RootMotion\FinalIK\IK Solvers\IKMapping.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\FBBIK\Scripts\InteractionC2CDemo.cs" />
     <Compile Include="Assets\Plugins\RootMotion\Shared Scripts\BipedLimbOrientations.cs" />
-    <Compile Include="Assets\Plugins\RootMotion\FinalIK\IK Solvers\IKMapping.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\IK Components\LimbIK.cs" />
     <Compile Include="Assets\Plugins\RootMotion\FinalIK\_DEMOS\VRIK\Scripts\VRIKPlatform.cs" />
     <Compile Include="Assets\Plugins\RootMotion\Shared Scripts\V3Tools.cs" />
@@ -1629,13 +1629,13 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="StudioEditor.Rendering.csproj" />
-    <ProjectReference Include="StudioEditor.Adapter.Koikatsu.csproj" />
-    <ProjectReference Include="StudioEditor.RenderScheme.DefaultAnime.csproj" />
-    <ProjectReference Include="StudioEditor.Adapter.Pmx.csproj" />
-    <ProjectReference Include="StudioEditor.Characters.csproj" />
-    <ProjectReference Include="StudioEditor.Runtime.csproj" />
     <ProjectReference Include="StudioEditor.Editor.csproj" />
+    <ProjectReference Include="StudioEditor.Runtime.csproj" />
+    <ProjectReference Include="StudioEditor.Characters.csproj" />
+    <ProjectReference Include="StudioEditor.Adapter.Koikatsu.csproj" />
+    <ProjectReference Include="StudioEditor.Adapter.Pmx.csproj" />
+    <ProjectReference Include="StudioEditor.RenderScheme.DefaultAnime.csproj" />
+    <ProjectReference Include="StudioEditor.Rendering.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

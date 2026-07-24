@@ -14,11 +14,13 @@ namespace StudioEditor.UI
     [RequireComponent(typeof(SceneContentController))]
     [RequireComponent(typeof(ReferenceModelPresentationController))]
     [RequireComponent(typeof(TimelineCaptureController))]
+    [RequireComponent(typeof(ScreenshotCaptureController))]
     [RequireComponent(typeof(SceneTimelineController))]
     public sealed class StudioEditorTopBar : MonoBehaviour
     {
         private SceneContentController controller;
         private TimelineCaptureController captureController;
+        private ScreenshotCaptureController screenshotController;
         private SceneTimelineController sceneTimeline;
         private EditableSkeletonController editableSkeleton;
         private StudioEditorViewport viewport;
@@ -37,6 +39,7 @@ namespace StudioEditor.UI
         {
             controller = GetComponent<SceneContentController>();
             captureController = GetComponent<TimelineCaptureController>();
+            screenshotController = GetComponent<ScreenshotCaptureController>();
             sceneTimeline = GetComponent<SceneTimelineController>();
             editableSkeleton = GetComponent<EditableSkeletonController>();
 
@@ -185,6 +188,10 @@ namespace StudioEditor.UI
                 controller,
                 workspaceTools);
             root.Add(animationPanel);
+
+            root.Add(new ScreenshotCapturePanel(
+                screenshotController,
+                workspaceTools));
 
             var timelinePanel = new ReferenceTimelinePanel(
                 controller,

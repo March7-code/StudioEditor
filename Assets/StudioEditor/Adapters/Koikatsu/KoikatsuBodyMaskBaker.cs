@@ -14,6 +14,65 @@ namespace StudioEditor.ReferenceModels
             Texture2D alphaMask,
             ICollection<Texture2D> runtimeTextures)
         {
+            return Bake(
+                source,
+                alphaMask,
+                true,
+                true,
+                runtimeTextures);
+        }
+
+        public static Texture2D Bake(
+            Texture2D source,
+            Texture2D alphaMask,
+            bool useRedChannel,
+            bool useGreenChannel,
+            ICollection<Texture2D> runtimeTextures)
+        {
+            return Bake(
+                source,
+                alphaMask,
+                Vector2.one,
+                Vector2.zero,
+                Vector2.one,
+                Vector2.zero,
+                useRedChannel,
+                useGreenChannel,
+                runtimeTextures);
+        }
+
+        public static Texture2D Bake(
+            Texture2D source,
+            Texture2D alphaMask,
+            Vector2 mainScale,
+            Vector2 mainOffset,
+            Vector2 maskScale,
+            Vector2 maskOffset,
+            ICollection<Texture2D> runtimeTextures)
+        {
+            return Bake(
+                source,
+                alphaMask,
+                mainScale,
+                mainOffset,
+                maskScale,
+                maskOffset,
+                true,
+                true,
+                runtimeTextures);
+        }
+
+        public static Texture2D Bake(
+            Texture2D source,
+            Texture2D alphaMask,
+            Vector2 mainScale,
+            Vector2 mainOffset,
+            Vector2 maskScale,
+            Vector2 maskOffset,
+            bool useRedChannel,
+            bool useGreenChannel,
+            ICollection<Texture2D> runtimeTextures)
+        {
             if (source == null || alphaMask == null)
             {
                 return source;
@@ -45,6 +104,20 @@ namespace StudioEditor.ReferenceModels
             try
             {
                 material.SetTexture("_AlphaMask", alphaMask);
+                var sampleScale = new Vector2(
+                    maskScale.x / NonZero(mainScale.x),
+                    maskScale.y / NonZero(mainScale.y));
+                var sampleOffset = maskOffset -
+                    Vector2.Scale(mainOffset, sampleScale);
+                material.SetVector("_MaskScale", sampleScale);
+                material.SetVector("_MaskOffset", sampleOffset);
+                material.SetVector(
+                    "_MaskChannels",
+                    new Vector4(
+                        useRedChannel ? 1f : 0f,
+                        useGreenChannel ? 1f : 0f,
+                        0f,
+                        0f));
                 Graphics.Blit(source, target, material, 0);
                 RenderTexture.active = target;
                 result = new Texture2D(
@@ -77,6 +150,11 @@ namespace StudioEditor.ReferenceModels
                 RenderTexture.ReleaseTemporary(target);
                 KoikatsuCharacterAssembler.DestroyRuntimeObject(material);
             }
+        }
+
+        private static float NonZero(float value)
+        {
+            return Mathf.Abs(value) > 0.000001f ? value : 1f;
         }
     }
 }

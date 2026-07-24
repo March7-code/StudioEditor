@@ -40,6 +40,8 @@ namespace StudioEditor.ReferenceModels
             new Dictionary<int, KoikatsuStudioBoneEntry>();
         private readonly Dictionary<int, KoikatsuStudioLightEntry> lightEntries =
             new Dictionary<int, KoikatsuStudioLightEntry>();
+        private readonly Dictionary<int, string> accessoryPointKeys =
+            new Dictionary<int, string>();
         private readonly Dictionary<StudioItemId, KoikatsuStudioAnimationEntry>
             animationEntries =
                 new Dictionary<StudioItemId, KoikatsuStudioAnimationEntry>();
@@ -254,6 +256,13 @@ namespace StudioEditor.ReferenceModels
             return lightEntries.TryGetValue(id, out entry);
         }
 
+        public bool TryGetStudioAccessoryPoint(
+            int id,
+            out string referenceKey)
+        {
+            return accessoryPointKeys.TryGetValue(id, out referenceKey);
+        }
+
         public bool TryGetStudioAnimation(
             int group,
             int category,
@@ -390,10 +399,15 @@ namespace StudioEditor.ReferenceModels
                                           name.StartsWith(
                                               "Light_",
                                               StringComparison.OrdinalIgnoreCase);
+                        var isAccessoryPointList = !string.IsNullOrEmpty(name) &&
+                                                   name.StartsWith(
+                                                       "AccessoryPoint_",
+                                                       StringComparison.OrdinalIgnoreCase);
                         var isAnimationList = IsAnimationListName(name);
                         var isHandList = TryParseHandList(name, out var hand);
                         if (!isItemList && !isMapList && !isBoneList &&
-                            !isLightList && !isAnimationList && !isHandList)
+                            !isLightList && !isAccessoryPointList &&
+                            !isAnimationList && !isHandList)
                         {
                             continue;
                         }
@@ -433,6 +447,10 @@ namespace StudioEditor.ReferenceModels
                             else if (isLightList)
                             {
                                 AddLightEntry(values);
+                            }
+                            else if (isAccessoryPointList)
+                            {
+                                AddAccessoryPointEntry(values);
                             }
                             else if (isHandList)
                             {
@@ -484,6 +502,18 @@ namespace StudioEditor.ReferenceModels
             }
 
             return result;
+        }
+
+        private void AddAccessoryPointEntry(IReadOnlyList<string> values)
+        {
+            if (values == null || values.Count < 3 ||
+                !int.TryParse(values[0], out var id) ||
+                string.IsNullOrWhiteSpace(values[2]))
+            {
+                return;
+            }
+
+            accessoryPointKeys[id] = values[2];
         }
 
         private void Add(KoikatsuChaListDataDto data)

@@ -455,6 +455,7 @@ namespace StudioEditor.ReferenceModels
             const string freeCameraId = "scene/free-camera";
             freeCamera = CreateFreeCamera(
                 instance.Root.transform,
+                source.Camera,
                 out freeCameraPose);
             camerasById[freeCameraId] = freeCamera;
             children.Add(new ReferenceSceneNode(
@@ -489,6 +490,10 @@ namespace StudioEditor.ReferenceModels
                     cameraObjectsById,
                     ref activeCameraId));
             }
+
+            // Opening a scene starts from its saved Studio view while keeping
+            // camera objects and slots available for explicit selection.
+            activeCameraId = freeCameraId;
 
             return new ReferenceSceneNode(
                 "scene",
@@ -596,13 +601,34 @@ namespace StudioEditor.ReferenceModels
 
         private static Camera CreateFreeCamera(
             Transform sceneRoot,
+            KoikatsuSceneCamera source,
             out ReferenceModelCameraPose pose)
         {
             var cameraObject = new GameObject("Free Camera");
             cameraObject.transform.SetParent(sceneRoot, false);
             var camera = ConfigureCamera(
                 cameraObject.AddComponent<Camera>(),
-                50f);
+                source?.FieldOfView ?? 50f);
+            if (source != null)
+            {
+                var localRotation = Quaternion.Euler(source.EulerAngles);
+                cameraObject.transform.localPosition =
+                    source.Target + localRotation * source.Distance;
+                cameraObject.transform.localRotation = localRotation;
+
+                var worldRotation = cameraObject.transform.rotation;
+                var worldTarget = sceneRoot.TransformPoint(source.Target);
+                var cameraDistance = Quaternion.Inverse(worldRotation) *
+                                     (cameraObject.transform.position -
+                                      worldTarget);
+                pose = new ReferenceModelCameraPose(
+                    worldTarget,
+                    worldRotation.eulerAngles,
+                    cameraDistance,
+                    camera.fieldOfView);
+                return camera;
+            }
+
             var renderers = sceneRoot.GetComponentsInChildren<Renderer>(true);
             var target = sceneRoot.position + Vector3.up;
             var distance = 8f;

@@ -569,7 +569,11 @@ namespace StudioEditor.ReferenceModels
             float eyesOpenMax,
             bool eyesBlink,
             int mouthPattern,
-            int eyesLookPattern)
+            int eyesLookPattern,
+            byte[] clothesStates,
+            byte shoesType,
+            bool[] showAccessories,
+            bool hideEyesHighlight)
         {
             ActiveCoordinateIndex = Math.Max(activeCoordinateIndex, 0);
             EyebrowPattern = Math.Max(eyebrowPattern, 0);
@@ -579,6 +583,10 @@ namespace StudioEditor.ReferenceModels
             EyesBlink = eyesBlink;
             MouthPattern = Math.Max(mouthPattern, 0);
             EyesLookPattern = Math.Max(eyesLookPattern, 0);
+            ClothesStates = clothesStates ?? new byte[9];
+            ShoesType = shoesType;
+            ShowAccessories = showAccessories ?? CreateVisibleAccessories();
+            HideEyesHighlight = hideEyesHighlight;
         }
 
         public int ActiveCoordinateIndex { get; }
@@ -597,6 +605,14 @@ namespace StudioEditor.ReferenceModels
 
         public int EyesLookPattern { get; }
 
+        public IReadOnlyList<byte> ClothesStates { get; }
+
+        public byte ShoesType { get; }
+
+        public IReadOnlyList<bool> ShowAccessories { get; }
+
+        public bool HideEyesHighlight { get; }
+
         internal static KoikatsuCardStatus CreateDefault(
             int activeCoordinateIndex = 0)
         {
@@ -608,7 +624,22 @@ namespace StudioEditor.ReferenceModels
                 1f,
                 true,
                 0,
-                0);
+                0,
+                new byte[9],
+                0,
+                CreateVisibleAccessories(),
+                false);
+        }
+
+        private static bool[] CreateVisibleAccessories()
+        {
+            var values = new bool[20];
+            for (var index = 0; index < values.Length; index++)
+            {
+                values[index] = true;
+            }
+
+            return values;
         }
     }
 

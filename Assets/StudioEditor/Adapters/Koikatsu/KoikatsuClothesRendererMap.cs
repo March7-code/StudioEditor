@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
+using StudioEditor.Rendering;
 using UnityEngine;
 
 namespace StudioEditor.ReferenceModels
@@ -20,12 +21,33 @@ namespace StudioEditor.ReferenceModels
     {
         private readonly IReadOnlyDictionary<Renderer, KoikatsuClothesTextureSlot>
             slots;
+        private readonly IReadOnlyList<GameObject> option01;
+        private readonly IReadOnlyList<GameObject> option02;
+        private readonly IReadOnlyList<GameObject> sleeves01;
+        private readonly IReadOnlyList<GameObject> sleeves02;
+        private readonly IReadOnlyList<GameObject> sleeves03;
+        private readonly IReadOnlyList<Renderer> emblem01;
+        private readonly IReadOnlyList<Renderer> emblem02;
 
         public KoikatsuClothesRendererMap(
-            IReadOnlyDictionary<Renderer, KoikatsuClothesTextureSlot> slots)
+            IReadOnlyDictionary<Renderer, KoikatsuClothesTextureSlot> slots,
+            IReadOnlyList<GameObject> option01,
+            IReadOnlyList<GameObject> option02,
+            IReadOnlyList<GameObject> sleeves01,
+            IReadOnlyList<GameObject> sleeves02,
+            IReadOnlyList<GameObject> sleeves03,
+            IReadOnlyList<Renderer> emblem01,
+            IReadOnlyList<Renderer> emblem02)
         {
             this.slots = slots ??
                 throw new ArgumentNullException(nameof(slots));
+            this.option01 = option01 ?? Array.Empty<GameObject>();
+            this.option02 = option02 ?? Array.Empty<GameObject>();
+            this.sleeves01 = sleeves01 ?? Array.Empty<GameObject>();
+            this.sleeves02 = sleeves02 ?? Array.Empty<GameObject>();
+            this.sleeves03 = sleeves03 ?? Array.Empty<GameObject>();
+            this.emblem01 = emblem01 ?? Array.Empty<Renderer>();
+            this.emblem02 = emblem02 ?? Array.Empty<Renderer>();
         }
 
         public bool TryGet(
@@ -33,6 +55,63 @@ namespace StudioEditor.ReferenceModels
             out KoikatsuClothesTextureSlot slot)
         {
             return slots.TryGetValue(renderer, out slot);
+        }
+
+        public void ApplyOptions(bool showOption01, bool showOption02)
+        {
+            SetActive(option01, showOption01);
+            SetActive(option02, showOption02);
+        }
+
+        public void ApplySleeves(int sleevesType)
+        {
+            if (sleevesType < 0)
+            {
+                return;
+            }
+
+            SetActive(sleeves01, sleevesType == 0);
+            SetActive(sleeves02, sleevesType == 1);
+            SetActive(sleeves03, sleevesType == 2);
+        }
+
+        public void ApplyEmblems(Texture2D texture01, Texture2D texture02)
+        {
+            SetMainTexture(emblem01, texture01);
+            SetMainTexture(emblem02, texture02);
+        }
+
+        private static void SetActive(
+            IReadOnlyList<GameObject> values,
+            bool active)
+        {
+            for (var index = 0; index < values.Count; index++)
+            {
+                values[index]?.SetActive(active);
+            }
+        }
+
+        private static void SetMainTexture(
+            IReadOnlyList<Renderer> renderers,
+            Texture texture)
+        {
+            for (var index = 0; index < renderers.Count; index++)
+            {
+                var renderer = renderers[index];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                renderer.gameObject.SetActive(texture != null);
+                var materials = renderer.sharedMaterials;
+                if (materials == null || materials.Length == 0)
+                {
+                    continue;
+                }
+
+                MaterialRenderUtility.SetMainTexture(materials[0], texture);
+            }
         }
     }
 
@@ -72,6 +151,8 @@ namespace StudioEditor.ReferenceModels
             var assignments = new Dictionary<
                 Renderer,
                 KoikatsuClothesTextureSlot>();
+            var emblem01 = new List<Renderer>();
+            var emblem02 = new List<Renderer>();
             var renderers = instance.GetComponentsInChildren<Renderer>(true);
             for (var index = 0; index < renderers.Length; index++)
             {
@@ -84,6 +165,15 @@ namespace StudioEditor.ReferenceModels
                         out var slot))
                 {
                     assignments[renderer] = slot;
+                }
+
+                if (locator != null && metadata.Emblem01.Contains(locator))
+                {
+                    emblem01.Add(renderer);
+                }
+                if (locator != null && metadata.Emblem02.Contains(locator))
+                {
+                    emblem02.Add(renderer);
                 }
             }
 
@@ -105,7 +195,15 @@ namespace StudioEditor.ReferenceModels
                     "renderers will keep their source textures.");
             }
 
-            return new KoikatsuClothesRendererMap(assignments);
+            return new KoikatsuClothesRendererMap(
+                assignments,
+                BindObjects(instance.transform, metadata.Option01),
+                BindObjects(instance.transform, metadata.Option02),
+                BindObjects(instance.transform, metadata.Sleeves01),
+                BindObjects(instance.transform, metadata.Sleeves02),
+                BindObjects(instance.transform, metadata.Sleeves03),
+                emblem01.AsReadOnly(),
+                emblem02.AsReadOnly());
         }
 
         private static string CreateCacheKey(
@@ -211,6 +309,51 @@ namespace StudioEditor.ReferenceModels
                         rootPathId,
                         behaviour["rendAccessory"],
                         KoikatsuClothesTextureSlot.Main);
+                    AddObjectArray(
+                        context,
+                        metadata.Option01,
+                        rootPathId,
+                        behaviour["objOpt01"]);
+                    AddObjectArray(
+                        context,
+                        metadata.Option02,
+                        rootPathId,
+                        behaviour["objOpt02"]);
+                    AddObjectArray(
+                        context,
+                        metadata.Sleeves01,
+                        rootPathId,
+                        behaviour["objSleeves01"]);
+                    AddObjectArray(
+                        context,
+                        metadata.Sleeves02,
+                        rootPathId,
+                        behaviour["objSleeves02"]);
+                    AddObjectArray(
+                        context,
+                        metadata.Sleeves03,
+                        rootPathId,
+                        behaviour["objSleeves03"]);
+                    AddRendererPointer(
+                        context,
+                        metadata.Emblem01,
+                        rootPathId,
+                        behaviour["rendEmblem01"]);
+                    AddRendererPointer(
+                        context,
+                        metadata.Emblem01,
+                        rootPathId,
+                        behaviour["rendEmblem02"]);
+                    AddRendererArray(
+                        context,
+                        metadata.Emblem01,
+                        rootPathId,
+                        behaviour["exRendEmblem01"]);
+                    AddRendererArray(
+                        context,
+                        metadata.Emblem02,
+                        rootPathId,
+                        behaviour["exRendEmblem02"]);
                     return metadata;
                 }
 
@@ -374,6 +517,99 @@ namespace StudioEditor.ReferenceModels
             {
                 metadata.Slots[locator] = slot;
             }
+        }
+
+        private static void AddObjectArray(
+            ParseContext context,
+            ISet<string> paths,
+            long rootPathId,
+            AssetTypeValueField field)
+        {
+            var array = GetArray(field);
+            if (array == null)
+            {
+                return;
+            }
+
+            for (var index = 0; index < array.Children.Count; index++)
+            {
+                var owner = context.Resolve(array.Children[index]);
+                if (owner.info == null ||
+                    owner.info.TypeId != (int)AssetClassID.GameObject)
+                {
+                    continue;
+                }
+
+                var transform = FindTransform(context, owner.baseField);
+                var path = transform.info == null
+                    ? null
+                    : CreateSerializedPath(context, rootPathId, transform);
+                if (path != null)
+                {
+                    paths.Add(path);
+                }
+            }
+        }
+
+        private static void AddRendererArray(
+            ParseContext context,
+            ISet<string> locators,
+            long rootPathId,
+            AssetTypeValueField field)
+        {
+            var array = GetArray(field);
+            if (array == null)
+            {
+                return;
+            }
+
+            for (var index = 0; index < array.Children.Count; index++)
+            {
+                AddRendererPointer(
+                    context,
+                    locators,
+                    rootPathId,
+                    array.Children[index]);
+            }
+        }
+
+        private static void AddRendererPointer(
+            ParseContext context,
+            ISet<string> locators,
+            long rootPathId,
+            AssetTypeValueField pointer)
+        {
+            var locator = CreateSerializedLocator(
+                context,
+                rootPathId,
+                pointer);
+            if (locator != null)
+            {
+                locators.Add(locator);
+            }
+        }
+
+        private static IReadOnlyList<GameObject> BindObjects(
+            Transform root,
+            ISet<string> paths)
+        {
+            if (paths == null || paths.Count == 0)
+            {
+                return Array.Empty<GameObject>();
+            }
+
+            var result = new List<GameObject>(paths.Count);
+            var transforms = root.GetComponentsInChildren<Transform>(true);
+            for (var index = 0; index < transforms.Length; index++)
+            {
+                var path = CreateRuntimePath(root, transforms[index]);
+                if (path != null && paths.Contains(path))
+                {
+                    result.Add(transforms[index].gameObject);
+                }
+            }
+
+            return result.AsReadOnly();
         }
 
         internal static string CreateSerializedLocator(
@@ -694,6 +930,20 @@ namespace StudioEditor.ReferenceModels
             public Dictionary<string, KoikatsuClothesTextureSlot> Slots { get; } =
                 new Dictionary<string, KoikatsuClothesTextureSlot>(
                     StringComparer.Ordinal);
+            public HashSet<string> Option01 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
+            public HashSet<string> Option02 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
+            public HashSet<string> Sleeves01 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
+            public HashSet<string> Sleeves02 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
+            public HashSet<string> Sleeves03 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
+            public HashSet<string> Emblem01 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
+            public HashSet<string> Emblem02 { get; } =
+                new HashSet<string>(StringComparer.Ordinal);
         }
 
         internal sealed class ParseContext

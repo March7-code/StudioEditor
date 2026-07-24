@@ -110,7 +110,8 @@ namespace StudioEditor.ReferenceModels
             KoikatsuCardFace face,
             KoikatsuTextureLoader textureLoader,
             int coordinateIndex,
-            ICollection<Texture2D> runtimeTextures)
+            ICollection<Texture2D> runtimeTextures,
+            bool hideHighlights = false)
         {
             if (face == null)
             {
@@ -158,6 +159,11 @@ namespace StudioEditor.ReferenceModels
                 "MainAB",
                 "EyeHiDownTex",
                 "ChaFileFace.hlDownId");
+            if (hideHighlights)
+            {
+                highlightUp = null;
+                highlightDown = null;
+            }
             var result = new KoikatsuBakedEyeTextures();
 
             var whiteOverride = textureLoader
@@ -280,29 +286,25 @@ namespace StudioEditor.ReferenceModels
                 : new Material(shader);
             try
             {
+                var rotation = GetEyeRotation(face, rightEye);
                 if (originalCreateMaterial != null)
                 {
-                    ConfigureOriginalMaterial(
+                    ConfigureOriginalBaseMaterial(
                         material,
                         pupil,
                         gradient,
-                        highlightUp,
-                        highlightDown,
-                        face.Appearance,
-                        rightEye,
-                        GetEyeRotation(face, rightEye));
+                        rotation);
                 }
                 else
                 {
-                    ConfigureFallbackMaterial(
+                    ConfigureIrisMaterial(
                         material,
                         pupil,
                         gradient,
                         highlightUp,
                         highlightDown,
                         face.Appearance,
-                        rightEye,
-                        GetEyeRotation(face, rightEye));
+                        rotation);
                 }
 
                 var texture = Render(
@@ -311,6 +313,19 @@ namespace StudioEditor.ReferenceModels
                     0,
                     $"Koikatsu Eye {(rightEye ? "R" : "L")} {pupil.Id}");
                 runtimeTextures.Add(texture);
+                if (originalCreateMaterial != null &&
+                    (highlightUp != null || highlightDown != null))
+                {
+                    texture = CompositeHighlights(
+                        shader,
+                        texture,
+                        highlightUp,
+                        highlightDown,
+                        face.Appearance,
+                        rotation,
+                        $"Koikatsu Eye {(rightEye ? "R" : "L")} Highlights");
+                    runtimeTextures.Add(texture);
+                }
                 texture = KoikatsuOverlayTextureBaker.Composite(
                     texture,
                     overlay,
@@ -330,14 +345,10 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
-        private static void ConfigureOriginalMaterial(
+        private static void ConfigureOriginalBaseMaterial(
             Material material,
             KoikatsuCardPupil pupil,
             Texture2D gradient,
-            Texture2D highlightUp,
-            Texture2D highlightDown,
-            KoikatsuCardFaceAppearance appearance,
-            bool rightEye,
             float rotation)
         {
             SetTexture(material, "_ColorMask", gradient ?? Texture2D.whiteTexture);
@@ -355,53 +366,20 @@ namespace StudioEditor.ReferenceModels
                     Mathf.Lerp(-0.5f, 0.5f, pupil.GradientOffsetY),
                     0f,
                     Mathf.Lerp(-1f, 1f, pupil.GradientScale)));
-
-            SetTexture(
-                material,
-                "_overtex1",
-                highlightUp ?? Texture2D.blackTexture);
-            SetTexture(
-                material,
-                "_overtex2",
-                highlightDown ?? Texture2D.blackTexture);
-            SetColor(
-                material,
-                "_overcolor1",
-                highlightUp != null
-                    ? appearance.HighlightUpColor
-                    : Color.clear);
-            SetColor(
-                material,
-                "_overcolor2",
-                highlightDown != null
-                    ? appearance.HighlightDownColor
-                    : Color.clear);
-            SetTextureOffset(
-                material,
-                "_overtex1",
-                new Vector2(
-                    0f,
-                    Mathf.Lerp(0.1f, -0.1f, appearance.HighlightUpY)));
-            SetTextureOffset(
-                material,
-                "_overtex2",
-                new Vector2(
-                    0f,
-                    Mathf.Lerp(0.1f, -0.1f, appearance.HighlightDownY)));
-            SetFloat(
-                material,
-                "_rotation",
-                rotation);
+            SetTexture(material, "_overtex1", Texture2D.blackTexture);
+            SetTexture(material, "_overtex2", Texture2D.blackTexture);
+            SetColor(material, "_overcolor1", Color.clear);
+            SetColor(material, "_overcolor2", Color.clear);
+            SetFloat(material, "_rotation", rotation);
         }
 
-        private static void ConfigureFallbackMaterial(
+        private static void ConfigureIrisMaterial(
             Material material,
             KoikatsuCardPupil pupil,
             Texture2D gradient,
             Texture2D highlightUp,
             Texture2D highlightDown,
             KoikatsuCardFaceAppearance appearance,
-            bool rightEye,
             float rotation)
         {
             material.SetTexture("_ColorMask", gradient ?? Texture2D.whiteTexture);
@@ -436,6 +414,51 @@ namespace StudioEditor.ReferenceModels
                 "_HasHighlightDown",
                 highlightDown != null ? 1f : 0f);
             material.SetFloat("_Rotation", rotation);
+        }
+
+        private static Texture2D CompositeHighlights(
+            Shader shader,
+            Texture2D source,
+            Texture2D highlightUp,
+            Texture2D highlightDown,
+            KoikatsuCardFaceAppearance appearance,
+            float rotation,
+            string name)
+        {
+            var material = new Material(shader);
+            try
+            {
+                material.SetTexture(
+                    "_HighlightUp",
+                    highlightUp ?? Texture2D.whiteTexture);
+                material.SetTexture(
+                    "_HighlightDown",
+                    highlightDown ?? Texture2D.whiteTexture);
+                material.SetColor(
+                    "_HighlightUpColor",
+                    appearance.HighlightUpColor);
+                material.SetColor(
+                    "_HighlightDownColor",
+                    appearance.HighlightDownColor);
+                material.SetFloat(
+                    "_HighlightUpOffsetY",
+                    Mathf.Lerp(0.1f, -0.1f, appearance.HighlightUpY));
+                material.SetFloat(
+                    "_HighlightDownOffsetY",
+                    Mathf.Lerp(0.1f, -0.1f, appearance.HighlightDownY));
+                material.SetFloat(
+                    "_HasHighlightUp",
+                    highlightUp != null ? 1f : 0f);
+                material.SetFloat(
+                    "_HasHighlightDown",
+                    highlightDown != null ? 1f : 0f);
+                material.SetFloat("_Rotation", rotation);
+                return Render(material, source, 2, name);
+            }
+            finally
+            {
+                KoikatsuCharacterAssembler.DestroyRuntimeObject(material);
+            }
         }
 
         private static void SetTexture(
@@ -479,17 +502,6 @@ namespace StudioEditor.ReferenceModels
             if (material.HasProperty(property))
             {
                 material.SetVector(property, value);
-            }
-        }
-
-        private static void SetTextureOffset(
-            Material material,
-            string property,
-            Vector2 offset)
-        {
-            if (material.HasProperty(property))
-            {
-                material.SetTextureOffset(property, offset);
             }
         }
 

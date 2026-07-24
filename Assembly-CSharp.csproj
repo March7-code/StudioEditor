@@ -49,8 +49,6 @@
     <Analyzer Include="F:\Unity\Editor\Data\Tools\BuildPipeline\Unity.SourceGenerators\Unity.UIToolkit.SourceGenerator.dll" />
     <Analyzer Include="F:\Unity\Editor\Data\Tools\BuildPipeline\Unity.Analyzers.Common\Unity.Analyzers.Common.dll" />
     <Analyzer Include="F:\Unity\Editor\Data\Tools\BuildPipeline\Unity.Analyzers.LongLiving\Unity.Analyzers.LongLiving.dll" />
-    <Analyzer Include="E:\GameProject\Editor\Assets\StudioEditor\Adapters\Koikatsu\Plugins\MessagePack.dll" />
-    <Analyzer Include="E:\GameProject\Editor\Assets\StudioEditor\Adapters\Koikatsu\Plugins\AssetsTools.NET.dll" />
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\Microsoft.Extensions.Logging.Generators.dll" />
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>

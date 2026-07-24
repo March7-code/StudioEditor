@@ -115,5 +115,63 @@ Shader "Hidden/StudioEditor/KoikatsuEyeBake"
             }
             ENDHLSL
         }
+
+        Pass
+        {
+            HLSLPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment fragHighlights
+            #include "UnityCG.cginc"
+
+            sampler2D _MainTex;
+            sampler2D _HighlightUp;
+            sampler2D _HighlightDown;
+            float4 _HighlightUpColor;
+            float4 _HighlightDownColor;
+            float _HighlightUpOffsetY;
+            float _HighlightDownOffsetY;
+            float _HasHighlightUp;
+            float _HasHighlightDown;
+            float _Rotation;
+
+            float2 RotateHighlightUv(float2 uv, float angle)
+            {
+                float sine;
+                float cosine;
+                sincos(angle, sine, cosine);
+                uv -= 0.5;
+                uv = float2(
+                    cosine * uv.x - sine * uv.y,
+                    sine * uv.x + cosine * uv.y);
+                return uv + 0.5;
+            }
+
+            float4 fragHighlights(v2f_img input) : SV_Target
+            {
+                float4 result = tex2D(_MainTex, input.uv);
+                float2 highlightUv = RotateHighlightUv(input.uv, _Rotation);
+                float4 upper = tex2D(
+                    _HighlightUp,
+                    highlightUv + float2(0.0, _HighlightUpOffsetY));
+                float upperAlpha = upper.a * _HighlightUpColor.a *
+                                   _HasHighlightUp * result.a;
+                result.rgb = lerp(
+                    result.rgb,
+                    upper.rgb * _HighlightUpColor.rgb,
+                    upperAlpha);
+
+                float4 lower = tex2D(
+                    _HighlightDown,
+                    highlightUv + float2(0.0, _HighlightDownOffsetY));
+                float lowerAlpha = lower.a * _HighlightDownColor.a *
+                                   _HasHighlightDown * result.a;
+                result.rgb = lerp(
+                    result.rgb,
+                    lower.rgb * _HighlightDownColor.rgb,
+                    lowerAlpha);
+                return result;
+            }
+            ENDHLSL
+        }
     }
 }

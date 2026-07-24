@@ -89,6 +89,119 @@ namespace StudioEditor.ReferenceModels
                 CharacterRenderSurfaceRole.Clothes);
         }
 
+        public static void ApplyClothesAlphaMask(
+            GameObject model,
+            Texture2D alphaMask,
+            Vector2 maskScale,
+            Vector2 maskOffset,
+            bool useRedChannel,
+            bool useGreenChannel,
+            ICollection<Texture2D> runtimeTextures)
+        {
+            if (model == null || alphaMask == null)
+            {
+                return;
+            }
+
+            if (runtimeTextures == null)
+            {
+                throw new ArgumentNullException(nameof(runtimeTextures));
+            }
+
+            var visited = new HashSet<Material>();
+            var renderers = model.GetComponentsInChildren<Renderer>(true);
+            for (var rendererIndex = 0;
+                 rendererIndex < renderers.Length;
+                 rendererIndex++)
+            {
+                var materials = renderers[rendererIndex].sharedMaterials;
+                for (var materialIndex = 0;
+                     materialIndex < materials.Length;
+                     materialIndex++)
+                {
+                    var material = materials[materialIndex];
+                    if (material == null || !visited.Add(material) ||
+                        !(GetMainTexture(material) is Texture2D source))
+                    {
+                        continue;
+                    }
+
+                    var mainScale = GetMainTextureScale(material);
+                    var mainOffset = GetMainTextureOffset(material);
+                    var masked = KoikatsuBodyMaskBaker.Bake(
+                        source,
+                        alphaMask,
+                        mainScale,
+                        mainOffset,
+                        maskScale,
+                        maskOffset,
+                        useRedChannel,
+                        useGreenChannel,
+                        runtimeTextures);
+                    MaterialRenderUtility.SetMainTexture(material, masked);
+                    var cutoff = material.HasProperty("_Cutoff")
+                        ? material.GetFloat("_Cutoff")
+                        : 0.5f;
+                    MaterialRenderUtility.ConfigureCutout(material, cutoff);
+                    if (IsEffectivelyTransparent(masked, cutoff))
+                    {
+                        DisableRenderersUsingMaterial(renderers, material);
+                    }
+                }
+            }
+        }
+
+        private static bool IsEffectivelyTransparent(
+            Texture2D texture,
+            float cutoff)
+        {
+            var pixels = texture.GetPixels32();
+            var visibleLimit = Math.Max(
+                1,
+                Mathf.CeilToInt(pixels.Length * 0.001f));
+            var alphaThreshold = Mathf.RoundToInt(
+                Mathf.Clamp01(cutoff) * byte.MaxValue);
+            var visible = 0;
+            for (var index = 0; index < pixels.Length; index++)
+            {
+                if (pixels[index].a <= alphaThreshold)
+                {
+                    continue;
+                }
+
+                visible++;
+                if (visible > visibleLimit)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static void DisableRenderersUsingMaterial(
+            IReadOnlyList<Renderer> renderers,
+            Material material)
+        {
+            for (var rendererIndex = 0;
+                 rendererIndex < renderers.Count;
+                 rendererIndex++)
+            {
+                var renderer = renderers[rendererIndex];
+                var materials = renderer.sharedMaterials;
+                for (var materialIndex = 0;
+                     materialIndex < materials.Length;
+                     materialIndex++)
+                {
+                    if (materials[materialIndex] == material)
+                    {
+                        renderer.enabled = false;
+                        break;
+                    }
+                }
+            }
+        }
+
         public static void ConvertAccessory(
             GameObject model,
             KoikatsuCardAccessory accessory,
@@ -1013,6 +1126,40 @@ namespace StudioEditor.ReferenceModels
             return material.HasProperty("BaseMap")
                 ? material.GetTexture("BaseMap")
                 : null;
+        }
+
+        private static Vector2 GetMainTextureScale(Material material)
+        {
+            if (material == null)
+            {
+                return Vector2.one;
+            }
+
+            if (material.HasProperty("_BaseMap"))
+            {
+                return material.GetTextureScale("_BaseMap");
+            }
+
+            return material.HasProperty("_MainTex")
+                ? material.GetTextureScale("_MainTex")
+                : Vector2.one;
+        }
+
+        private static Vector2 GetMainTextureOffset(Material material)
+        {
+            if (material == null)
+            {
+                return Vector2.zero;
+            }
+
+            if (material.HasProperty("_BaseMap"))
+            {
+                return material.GetTextureOffset("_BaseMap");
+            }
+
+            return material.HasProperty("_MainTex")
+                ? material.GetTextureOffset("_MainTex")
+                : Vector2.zero;
         }
 
         private static Texture SelectTexture(

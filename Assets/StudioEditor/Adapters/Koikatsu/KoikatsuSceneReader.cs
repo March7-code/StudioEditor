@@ -263,10 +263,15 @@ namespace StudioEditor.ReferenceModels
                 MaxCollectionCount,
                 "character child groups");
             var children = new List<KoikatsuSceneObject>();
+            var groupedChildren =
+                new Dictionary<int, IReadOnlyList<KoikatsuSceneObject>>(
+                    childGroups);
             for (var index = 0; index < childGroups; index++)
             {
-                reader.ReadInt32();
-                children.AddRange(ReadChildren(reader, version, depth));
+                var group = reader.ReadInt32();
+                var groupChildren = ReadChildren(reader, version, depth);
+                groupedChildren[group] = groupChildren;
+                children.AddRange(groupChildren);
             }
 
             character.KinematicMode = reader.ReadInt32();
@@ -314,6 +319,7 @@ namespace StudioEditor.ReferenceModels
             character.AnimationNormalizedTime = reader.ReadSingle();
             SkipIntDictionary(reader, "character access groups");
             SkipIntDictionary(reader, "character access numbers");
+            character.ChildGroups = groupedChildren;
             result.Children = children.AsReadOnly();
             result.Character = character;
         }
@@ -1327,6 +1333,8 @@ namespace StudioEditor.ReferenceModels
             Card = card ?? throw new ArgumentNullException(nameof(card));
             Bones = new Dictionary<int, KoikatsuSceneBone>();
             IkTargets = new Dictionary<int, KoikatsuSceneBone>();
+            ChildGroups =
+                new Dictionary<int, IReadOnlyList<KoikatsuSceneObject>>();
             ActiveIK = Array.Empty<bool>();
             ActiveFK = Array.Empty<bool>();
             ExpressionEnabled = Array.Empty<bool>();
@@ -1350,6 +1358,9 @@ namespace StudioEditor.ReferenceModels
             get;
             internal set;
         }
+
+        public IReadOnlyDictionary<int, IReadOnlyList<KoikatsuSceneObject>>
+            ChildGroups { get; internal set; }
 
         public int KinematicMode { get; internal set; }
 

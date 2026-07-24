@@ -1558,6 +1558,10 @@
     font-size: 10px;
 }
 
+.workspace-tools .screenshot-capture-launcher {
+    font-size: 9px;
+}
+
 .workspace-tools .character-animation-launcher {
     font-size: 14px;
 }
@@ -1569,10 +1573,150 @@
 .workspace-tools .workspace-add--open,
 .workspace-tools .character-animation-launcher--open,
 .workspace-tools .timeline-launcher--open,
+.workspace-tools .screenshot-capture-launcher--open,
 .workspace-tools .settings-launcher--open {
     color: white;
     background-color: rgb(35, 109, 88);
     border-color: rgb(70, 158, 132);
+}
+
+.screenshot-capture-host {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 320px;
+    bottom: 0;
+}
+
+.screenshot-capture-panel {
+    position: absolute;
+    top: 100px;
+    left: 58px;
+    width: 300px;
+    height: 238px;
+    color: rgb(222, 226, 230);
+    background-color: rgba(28, 31, 34, 0.98);
+    border-width: 1px;
+    border-color: rgb(68, 74, 80);
+    border-radius: 4px;
+}
+
+.screenshot-capture-panel__header {
+    height: 38px;
+    min-height: 38px;
+    padding: 5px 6px;
+    flex-direction: row;
+    align-items: center;
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(55, 60, 65);
+}
+
+.screenshot-capture-panel__title {
+    flex-grow: 1;
+    margin-left: 7px;
+    color: rgb(238, 241, 243);
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.screenshot-capture-panel__close {
+    width: 27px;
+    height: 27px;
+    min-width: 27px;
+    min-height: 27px;
+    margin: 0;
+    padding: 0;
+    color: rgb(190, 197, 203);
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+    border-radius: 2px;
+    font-size: 12px;
+}
+
+.screenshot-capture-panel__close:hover {
+    color: white;
+    background-color: rgb(48, 53, 58);
+}
+
+.screenshot-capture-panel__content {
+    padding: 10px 12px;
+}
+
+.screenshot-capture-panel__label {
+    height: 20px;
+    min-height: 20px;
+    color: rgb(238, 241, 243);
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.screenshot-capture-panel__resolution {
+    flex-direction: row;
+    margin: 3px 0 10px 0;
+}
+
+.screenshot-capture-panel__field {
+    width: 132px;
+    height: 28px;
+    min-height: 28px;
+    margin: 0 5px 0 0;
+    font-size: 10px;
+}
+
+.screenshot-capture-panel__field--last {
+    margin-right: 0;
+}
+
+.screenshot-capture-panel__field .unity-base-field__label {
+    width: 45px;
+    min-width: 45px;
+    color: rgb(169, 176, 182);
+}
+
+.screenshot-capture-panel__field .unity-base-text-field__input {
+    min-width: 0;
+    color: rgb(230, 233, 236);
+    background-color: rgb(40, 44, 48);
+    border-width: 1px;
+    border-color: rgb(62, 68, 73);
+    border-radius: 2px;
+}
+
+.screenshot-capture-panel__capture {
+    width: 100%;
+    height: 32px;
+    min-height: 32px;
+    margin: 0 0 8px 0;
+    color: rgb(231, 245, 239);
+    background-color: rgb(35, 109, 88);
+    border-width: 1px;
+    border-color: rgb(70, 158, 132);
+    border-radius: 3px;
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.screenshot-capture-panel__capture:hover {
+    color: white;
+    background-color: rgb(43, 137, 108);
+}
+
+.screenshot-capture-panel__status {
+    min-height: 18px;
+    color: rgb(205, 211, 217);
+    font-size: 10px;
+    white-space: normal;
+}
+
+.screenshot-capture-panel__path {
+    height: 26px;
+    min-height: 26px;
+    margin-top: 2px;
+    color: rgb(135, 144, 153);
+    font-size: 9px;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .workspace-add:disabled {
@@ -1594,7 +1738,7 @@
 
 .editor-settings-menu {
     position: absolute;
-    top: 144px;
+    top: 188px;
     left: 58px;
     width: 190px;
     height: 81px;
@@ -1662,7 +1806,7 @@
 
 .editor-settings-panel {
     position: absolute;
-    top: 144px;
+    top: 188px;
     left: 256px;
     width: 380px;
     height: 316px;

@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
   <!-- Generated file, do not modify, your changes will be overwritten (use AssetPostprocessor.OnGeneratedCSProject) -->
   <PropertyGroup>
     <BaseIntermediateOutputPath>Temp\obj\$(MSBuildProjectName)</BaseIntermediateOutputPath>
@@ -1567,13 +1567,13 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Assembly-CSharp-firstpass.csproj" />
-    <ProjectReference Include="StudioEditor.Rendering.csproj" />
-    <ProjectReference Include="StudioEditor.Adapter.Koikatsu.csproj" />
-    <ProjectReference Include="StudioEditor.RenderScheme.DefaultAnime.csproj" />
-    <ProjectReference Include="StudioEditor.Adapter.Pmx.csproj" />
-    <ProjectReference Include="StudioEditor.Characters.csproj" />
-    <ProjectReference Include="StudioEditor.Runtime.csproj" />
     <ProjectReference Include="StudioEditor.Editor.csproj" />
+    <ProjectReference Include="StudioEditor.Runtime.csproj" />
+    <ProjectReference Include="StudioEditor.Characters.csproj" />
+    <ProjectReference Include="StudioEditor.Adapter.Koikatsu.csproj" />
+    <ProjectReference Include="StudioEditor.Adapter.Pmx.csproj" />
+    <ProjectReference Include="StudioEditor.RenderScheme.DefaultAnime.csproj" />
+    <ProjectReference Include="StudioEditor.Rendering.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>

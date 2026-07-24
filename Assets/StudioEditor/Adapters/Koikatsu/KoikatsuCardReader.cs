@@ -158,7 +158,11 @@ namespace StudioEditor.ReferenceModels
                     status.EyesOpenMax,
                     status.EyesBlink,
                     status.MouthPattern,
-                    status.EyesLookPattern);
+                    status.EyesLookPattern,
+                    status.ClothesStates,
+                    status.ShoesType,
+                    status.ShowAccessories,
+                    status.HideEyesHighlight);
             }
             catch (Exception exception)
             {
@@ -778,6 +782,15 @@ namespace StudioEditor.ReferenceModels
             [Key("coordinateType")]
             public int CoordinateType { get; set; }
 
+            [Key("clothesState")]
+            public byte[] ClothesStates { get; set; }
+
+            [Key("shoesType")]
+            public byte ShoesType { get; set; }
+
+            [Key("showAccessory")]
+            public bool[] ShowAccessories { get; set; }
+
             [Key("eyebrowPtn")]
             public int EyebrowPattern { get; set; }
 
@@ -798,6 +811,9 @@ namespace StudioEditor.ReferenceModels
 
             [Key("eyesLookPtn")]
             public int EyesLookPattern { get; set; }
+
+            [Key("hideEyesHighlight")]
+            public bool HideEyesHighlight { get; set; }
         }
 
         [MessagePackObject]

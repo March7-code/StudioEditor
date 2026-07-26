@@ -53,6 +53,7 @@
     <Analyzer Include="F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\StudioEditor\Editor\CascadeurBridgeWindow.cs" />
     <Compile Include="Assets\StudioEditor\Editor\FinalIkIntegrationDetector.cs" />
     <Compile Include="Assets\StudioEditor\Editor\CharacterControlPointTool.cs" />
   </ItemGroup>
@@ -1270,6 +1271,10 @@
     </Reference>
     <Reference Include="System.Text.Json">
       <HintPath>F:\Unity\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\ref\System.Text.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.Formats.Fbx.Editor">
+      <HintPath>Library\ScriptAssemblies\Unity.Formats.Fbx.Editor.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEditor.UI">

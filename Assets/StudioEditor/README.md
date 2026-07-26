@@ -112,3 +112,20 @@ binds `objectIndex` to Studio's dictionary-key-sorted object order and resolves 
 paths against the assembled hierarchy. Keyframe interpolation uses the curve stored
 on the source keyframe. Camera, visibility, face, material, light, constraint, and
 other plugin-owned value tracks remain visible as unsupported and are later stages.
+
+## Cascadeur Bridge
+
+`Tools > Studio Editor > Cascadeur Bridge` provides an Editor-only character animation
+round trip while the project is in Play Mode. Import a Koikatsu scene card first, then
+export the loaded scene to FBX. Characters, props, and hierarchy are exported together;
+the supported character pose portion of the imported Timeline is baked into an FBX take
+at the selected frame rate. A `.cascadeur.json` file beside the FBX records the character
+roots needed to distinguish multiple characters that use the same skeleton names.
+
+After editing in Cascadeur, export an FBX while preserving the character hierarchy and
+bone names. Import that file from the same window, choose the source character, target
+Unity character, and animation clip, then apply it. The returned clip is sampled as an
+`ActionEditing` pose layer, after the imported Koikatsu Timeline and before body
+constraints, so it can be previewed without modifying or writing a Koikatsu scene card.
+The first version imports character transform animation only; scene props are export
+references and expressions, hand presets, materials, and prop animation are not returned.

@@ -43,6 +43,18 @@ namespace StudioEditor.Characters
         Skirt = 1 << 8,
     }
 
+    public enum CharacterFullBodyIkTarget
+    {
+        LeftHand,
+        LeftElbow,
+        RightHand,
+        RightElbow,
+        LeftFoot,
+        LeftKnee,
+        RightFoot,
+        RightKnee,
+    }
+
     public interface ICharacterModel : IDisposable
     {
         string DisplayName { get; }
@@ -93,6 +105,18 @@ namespace StudioEditor.Characters
             CharacterKinematicMode mode,
             CharacterKinematicGroups group,
             bool active);
+    }
+
+    public interface ICharacterFullBodyIkTargetController
+    {
+        bool SupportsTarget(CharacterFullBodyIkTarget target);
+
+        bool SetTarget(
+            CharacterFullBodyIkTarget target,
+            Vector3 worldPosition,
+            Quaternion worldRotation);
+
+        bool ClearTarget(CharacterFullBodyIkTarget target);
     }
 
     public interface ICharacterPatternController

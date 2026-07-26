@@ -11,6 +11,8 @@ namespace StudioEditor.Characters
         public const int Timeline = 300;
         public const int ActionEditing = 1000;
         public const int BodyConstraints = 2000;
+        public const int ControlOverrides = 2500;
+        public const int FullBodyIk = 2750;
         public const int EyeLook = 3000;
     }
 

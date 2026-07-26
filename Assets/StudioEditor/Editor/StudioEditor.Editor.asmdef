@@ -4,7 +4,8 @@
   "references": [
     "StudioEditor.Runtime",
     "StudioEditor.Characters",
-    "StudioEditor.Adapter.Koikatsu"
+    "StudioEditor.Adapter.Koikatsu",
+    "Unity.Formats.Fbx.Editor"
   ],
   "includePlatforms": [
     "Editor"

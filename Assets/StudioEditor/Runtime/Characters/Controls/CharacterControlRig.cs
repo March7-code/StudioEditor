@@ -44,6 +44,7 @@ namespace StudioEditor.Characters.Controls
         private readonly ICharacterModel model;
         private readonly ICharacterPosePipeline coordinator;
         private readonly ICharacterKinematicGroupController kinematics;
+        private readonly ICharacterFullBodyIkTargetController fullBodyIk;
         private readonly CharacterPoseLayer poseLayer;
         private readonly ControlPoseModifier modifier;
         private readonly Dictionary<CharacterControlPoint, ControlDefinition>
@@ -74,6 +75,7 @@ namespace StudioEditor.Characters.Controls
             }
 
             kinematics = model as ICharacterKinematicGroupController;
+            fullBodyIk = model as ICharacterFullBodyIkTargetController;
 
             BuildDefinitions(model.Skeleton);
             var values = new List<CharacterControlPoint>();
@@ -94,7 +96,7 @@ namespace StudioEditor.Characters.Controls
 
             poseLayer = new CharacterPoseLayer(
                 model.Skeleton,
-                CharacterPoseStages.ActionEditing,
+                CharacterPoseStages.ControlOverrides,
                 $"{model.DisplayName} Control Points");
             modifier = new ControlPoseModifier(this);
             coordinator.RegisterModifier(modifier);
@@ -122,6 +124,7 @@ namespace StudioEditor.Characters.Controls
                 enabled = value;
                 if (!enabled)
                 {
+                    ClearFullBodyIkTargets();
                     RestoreAllBaselinesToTransforms();
                     poseLayer.Clear();
                     RestoreAllKinematicGroups();
@@ -129,6 +132,7 @@ namespace StudioEditor.Characters.Controls
                 else
                 {
                     SuspendActiveKinematicGroups();
+                    ApplyFullBodyIkTargets();
                 }
 
                 coordinator.EvaluateNow();
@@ -140,7 +144,7 @@ namespace StudioEditor.Characters.Controls
             return states.TryGetValue(point, out var state) && state.Active;
         }
 
-        public bool TryGetControlPosition(
+        public bool TryGetSolvedPosition(
             CharacterControlPoint point,
             out Vector3 position)
         {
@@ -150,13 +154,9 @@ namespace StudioEditor.Characters.Controls
                 return false;
             }
 
-            var state = states[point];
-            if (state.Active)
-            {
-                position = state.Target;
-                return true;
-            }
-
+            // A two-bone target can be unreachable, and a pole target only
+            // defines the bend plane. Keep the editor control attached to the
+            // solved joint instead of displaying the unconstrained request.
             position = GetBoneWorldPosition(definition.AnchorIndex);
             return true;
         }
@@ -189,20 +189,6 @@ namespace StudioEditor.Characters.Controls
             return true;
         }
 
-        public bool TryGetAnchorPosition(
-            CharacterControlPoint point,
-            out Vector3 position)
-        {
-            if (!definitions.TryGetValue(point, out var definition))
-            {
-                position = default;
-                return false;
-            }
-
-            position = GetBoneWorldPosition(definition.AnchorIndex);
-            return true;
-        }
-
         public bool SetTarget(CharacterControlPoint point, Vector3 worldPosition)
         {
             if (!IsFinite(worldPosition) ||
@@ -214,8 +200,13 @@ namespace StudioEditor.Characters.Controls
             var state = states[point];
             if (!state.Active)
             {
-                SuspendKinematicGroup(point);
-                CaptureBaselines(definition);
+                state.UsesFullBodyIk = CanUseFullBodyIk(point);
+                if (!state.UsesFullBodyIk)
+                {
+                    SuspendKinematicGroup(point);
+                    CaptureBaselines(definition);
+                }
+
                 state.Active = true;
                 state.TargetRotation = definition.RotationIndex >= 0
                     ? GetBoneWorldRotation(definition.RotationIndex)
@@ -224,6 +215,11 @@ namespace StudioEditor.Characters.Controls
 
             state.Target = worldPosition;
             states[point] = state;
+            if (enabled && state.UsesFullBodyIk)
+            {
+                ApplyFullBodyIkTarget(point, state);
+            }
+
             coordinator.EvaluateNow();
             return true;
         }
@@ -242,18 +238,32 @@ namespace StudioEditor.Characters.Controls
             var state = states[point];
             if (!state.Active)
             {
-                SuspendKinematicGroup(point);
-                CaptureBaselines(definition);
+                state.UsesFullBodyIk = CanUseFullBodyIk(point);
+                if (!state.UsesFullBodyIk)
+                {
+                    SuspendKinematicGroup(point);
+                    CaptureBaselines(definition);
+                }
+
                 state.Active = true;
                 state.Target = GetBoneWorldPosition(definition.AnchorIndex);
             }
 
-            CaptureBaseline(
-                definition.RotationIndex,
-                CharacterPoseChannels.Rotation);
+            if (!state.UsesFullBodyIk)
+            {
+                CaptureBaseline(
+                    definition.RotationIndex,
+                    CharacterPoseChannels.Rotation);
+            }
+
             state.RotationActive = true;
             state.TargetRotation = worldRotation.normalized;
             states[point] = state;
+            if (enabled && state.UsesFullBodyIk)
+            {
+                ApplyFullBodyIkTarget(point, state);
+            }
+
             coordinator.EvaluateNow();
             return true;
         }
@@ -263,6 +273,11 @@ namespace StudioEditor.Characters.Controls
             if (!states.TryGetValue(point, out var state) || !state.Active)
             {
                 return false;
+            }
+
+            if (state.UsesFullBodyIk)
+            {
+                ClearFullBodyIkTarget(point);
             }
 
             states[point] = default;
@@ -282,6 +297,11 @@ namespace StudioEditor.Characters.Controls
                 if (!state.Active)
                 {
                     continue;
+                }
+
+                if (state.UsesFullBodyIk)
+                {
+                    ClearFullBodyIkTarget(point);
                 }
 
                 states[point] = default;
@@ -306,6 +326,7 @@ namespace StudioEditor.Characters.Controls
             }
 
             disposed = true;
+            ClearFullBodyIkTargets();
             RestoreAllBaselinesToTransforms();
             poseLayer.Clear();
             RestoreAllKinematicGroups();
@@ -321,12 +342,104 @@ namespace StudioEditor.Characters.Controls
             definitions.Clear();
         }
 
+        private bool CanUseFullBodyIk(CharacterControlPoint point)
+        {
+            return fullBodyIk != null &&
+                   TryGetFullBodyIkTarget(point, out var target) &&
+                   fullBodyIk.SupportsTarget(target);
+        }
+
+        private void ApplyFullBodyIkTargets()
+        {
+            for (var index = 0; index < controlPoints.Count; index++)
+            {
+                var point = controlPoints[index];
+                var state = states[point];
+                if (state.Active && state.UsesFullBodyIk)
+                {
+                    ApplyFullBodyIkTarget(point, state);
+                }
+            }
+        }
+
+        private void ApplyFullBodyIkTarget(
+            CharacterControlPoint point,
+            ControlState state)
+        {
+            if (fullBodyIk != null &&
+                TryGetFullBodyIkTarget(point, out var target))
+            {
+                fullBodyIk.SetTarget(
+                    target,
+                    state.Target,
+                    state.TargetRotation);
+            }
+        }
+
+        private void ClearFullBodyIkTargets()
+        {
+            for (var index = 0; index < controlPoints.Count; index++)
+            {
+                var point = controlPoints[index];
+                var state = states[point];
+                if (state.Active && state.UsesFullBodyIk)
+                {
+                    ClearFullBodyIkTarget(point);
+                }
+            }
+        }
+
+        private void ClearFullBodyIkTarget(CharacterControlPoint point)
+        {
+            if (fullBodyIk != null &&
+                TryGetFullBodyIkTarget(point, out var target))
+            {
+                fullBodyIk.ClearTarget(target);
+            }
+        }
+
+        private static bool TryGetFullBodyIkTarget(
+            CharacterControlPoint point,
+            out CharacterFullBodyIkTarget target)
+        {
+            switch (point)
+            {
+                case CharacterControlPoint.LeftHand:
+                    target = CharacterFullBodyIkTarget.LeftHand;
+                    return true;
+                case CharacterControlPoint.LeftElbow:
+                    target = CharacterFullBodyIkTarget.LeftElbow;
+                    return true;
+                case CharacterControlPoint.RightHand:
+                    target = CharacterFullBodyIkTarget.RightHand;
+                    return true;
+                case CharacterControlPoint.RightElbow:
+                    target = CharacterFullBodyIkTarget.RightElbow;
+                    return true;
+                case CharacterControlPoint.LeftFoot:
+                    target = CharacterFullBodyIkTarget.LeftFoot;
+                    return true;
+                case CharacterControlPoint.LeftKnee:
+                    target = CharacterFullBodyIkTarget.LeftKnee;
+                    return true;
+                case CharacterControlPoint.RightFoot:
+                    target = CharacterFullBodyIkTarget.RightFoot;
+                    return true;
+                case CharacterControlPoint.RightKnee:
+                    target = CharacterFullBodyIkTarget.RightKnee;
+                    return true;
+                default:
+                    target = default;
+                    return false;
+            }
+        }
+
         private void SuspendActiveKinematicGroups()
         {
             for (var index = 0; index < controlPoints.Count; index++)
             {
                 var point = controlPoints[index];
-                if (states[point].Active)
+                if (states[point].Active && !states[point].UsesFullBodyIk)
                 {
                     SuspendKinematicGroup(point);
                 }
@@ -548,6 +661,12 @@ namespace StudioEditor.Characters.Controls
             states.TryGetValue(endpoint, out var endpointState);
             states.TryGetValue(pole, out var poleState);
             if (!endpointState.Active && !poleState.Active)
+            {
+                return;
+            }
+
+            if (endpointState.Active && endpointState.UsesFullBodyIk ||
+                poleState.Active && poleState.UsesFullBodyIk)
             {
                 return;
             }
@@ -1119,6 +1238,7 @@ namespace StudioEditor.Characters.Controls
         private struct ControlState
         {
             public bool Active;
+            public bool UsesFullBodyIk;
             public Vector3 Target;
             public bool RotationActive;
             public Quaternion TargetRotation;

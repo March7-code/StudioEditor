@@ -52,11 +52,11 @@ namespace StudioEditor.ReferenceModels
                 }
 
                 component.FixTransforms = true;
-                component.SetReferences(
-                    references,
-                    KoikatsuFinalIkRuntime.GetMember<Transform>(
-                        references,
-                        "pelvis"));
+                // Match FullBodyBipedIK's reference setup. A null root node
+                // lets the solver choose the lower spine bone that best
+                // balances the shoulder and thigh chains. Pinning it to the
+                // pelvis makes hand pull distribute poorly through clavicles.
+                component.SetReferences(references, null);
                 component.Enabled = false;
 
                 if (component.ReferencesError(ref error))
@@ -244,8 +244,8 @@ namespace StudioEditor.ReferenceModels
                 rightLeg,
                 12);
 
-            // Final IK is driven by KoikatsuStudioCharacterPose at an explicit
-            // point in the pose pipeline. Leaving the component disabled keeps
+            // KoikatsuStudioCharacterPose drives Final IK immediately before the
+            // coordinator's final pose pass. Leaving the component disabled keeps
             // RootMotion's unspecified LateUpdate out of the evaluation order.
             fullBodyIk.Enabled = false;
         }

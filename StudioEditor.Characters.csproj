@@ -63,6 +63,7 @@
     <Compile Include="Assets\StudioEditor\Runtime\Characters\Kinematics\CharacterTwoBoneSolver.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\Characters\Constraints\CharacterBodyConstraintRig.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\Characters\Pose\CharacterPoseCoordinator.cs" />
+    <Compile Include="Assets\StudioEditor\Runtime\Characters\Pose\CascadeurAnimationPlayer.cs" />
     <Compile Include="Assets\StudioEditor\Runtime\Characters\Pose\CharacterPoseBuffer.cs" />
   </ItemGroup>
   <ItemGroup>

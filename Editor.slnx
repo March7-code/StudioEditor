@@ -7,7 +7,7 @@
   <Project Path="StudioEditor.Runtime.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
   <Project Path="StudioEditor.Adapter.Pmx.csproj" />
-  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="StudioEditor.Editor.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="StudioEditor.RenderScheme.DefaultAnime.csproj" />
 </Solution>

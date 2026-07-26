@@ -25,7 +25,6 @@ namespace StudioEditor.Editor
             new Color(0.025f, 0.03f, 0.035f, 0.95f);
 
         private static bool enabled;
-
         public static event Action StateChanged;
 
         public static bool Enabled => enabled;
@@ -137,7 +136,7 @@ namespace StudioEditor.Editor
             for (var index = 0; index < points.Count; index++)
             {
                 var point = points[index];
-                if (!rig.TryGetControlPosition(point, out var position))
+                if (!rig.TryGetSolvedPosition(point, out var position))
                 {
                     continue;
                 }
@@ -170,12 +169,6 @@ namespace StudioEditor.Editor
                     size,
                     rigIndex);
 
-                if (active &&
-                    rig.TryGetAnchorPosition(point, out var anchor))
-                {
-                    Handles.color = LinkColor;
-                    Handles.DrawLine(anchor, position, 3f);
-                }
             }
 
             if (!ReferenceEquals(controller.SelectedRig, rig) ||
@@ -237,7 +230,7 @@ namespace StudioEditor.Editor
             CharacterControlRig rig,
             CharacterControlPoint point)
         {
-            if (!rig.TryGetControlPosition(point, out var position))
+            if (!rig.TryGetSolvedPosition(point, out var position))
             {
                 return;
             }
@@ -246,7 +239,8 @@ namespace StudioEditor.Editor
             var nextPosition = Handles.PositionHandle(
                 position,
                 Quaternion.identity);
-            if (EditorGUI.EndChangeCheck() && rig.SetTarget(point, nextPosition))
+            if (EditorGUI.EndChangeCheck() &&
+                rig.SetTarget(point, nextPosition))
             {
                 SceneView.RepaintAll();
             }
@@ -258,7 +252,7 @@ namespace StudioEditor.Editor
             }
 
             EditorGUI.BeginChangeCheck();
-            var nextRotation = Handles.RotationHandle(rotation, nextPosition);
+            var nextRotation = Handles.RotationHandle(rotation, position);
             if (EditorGUI.EndChangeCheck() &&
                 rig.SetTargetRotation(point, nextRotation))
             {

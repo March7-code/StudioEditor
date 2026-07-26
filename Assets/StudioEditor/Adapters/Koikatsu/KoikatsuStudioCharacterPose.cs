@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace StudioEditor.ReferenceModels
 {
-    [DefaultExecutionOrder(31000)]
+    [DefaultExecutionOrder(29900)]
     public sealed class KoikatsuStudioCharacterPose : MonoBehaviour
     {
         private const float Epsilon = 0.000001f;
@@ -33,10 +33,15 @@ namespace StudioEditor.ReferenceModels
         private Transform[] ikTargets;
         private bool[] activeIk;
         private bool[] activeFk;
+        private readonly Dictionary<CharacterFullBodyIkTarget, ManualIkTarget>
+            manualIkTargets =
+                new Dictionary<CharacterFullBodyIkTarget, ManualIkTarget>();
+        private readonly bool[] effectiveIkGroups = new bool[5];
         private Dictionary<string, Transform> targetsByName;
         private ICharacterPosePipeline poseCoordinator;
         private ICharacterPoseModifier fkModifier;
         private ICharacterPoseModifier ikModifier;
+        private ICharacterPoseModifier finalIkModifier;
         private KoikatsuStudioFinalIkRig finalIkRig;
         private CharacterKinematicModes supportedKinematicModes;
         private CharacterKinematicModes activeKinematicModes;
@@ -213,6 +218,69 @@ namespace StudioEditor.ReferenceModels
             return false;
         }
 
+        public bool SupportsManualIkTarget(CharacterFullBodyIkTarget target)
+        {
+            return finalIkRig != null &&
+                   TryGetManualIkTargetId(target, out var id) &&
+                   id >= 0 && id < ikTargets.Length &&
+                   ikTargets[id] != null;
+        }
+
+        public bool SetManualIkTarget(
+            CharacterFullBodyIkTarget target,
+            Vector3 worldPosition,
+            Quaternion worldRotation)
+        {
+            if (!SupportsManualIkTarget(target) ||
+                !TryGetManualIkTargetId(target, out var id))
+            {
+                return false;
+            }
+
+            var targetTransform = ikTargets[id];
+            if (!manualIkTargets.TryGetValue(target, out var value))
+            {
+                value = new ManualIkTarget(
+                    targetTransform.localPosition,
+                    targetTransform.localRotation);
+            }
+
+            value.WorldPosition = worldPosition;
+            value.WorldRotation = worldRotation;
+            manualIkTargets[target] = value;
+            ApplyManualIkTarget(target, value);
+            UpdateKinematicState();
+            return true;
+        }
+
+        public bool ClearManualIkTarget(CharacterFullBodyIkTarget target)
+        {
+            if (!manualIkTargets.TryGetValue(target, out var value) ||
+                !TryGetManualIkTargetId(target, out var id))
+            {
+                return false;
+            }
+
+            var resetSolverPose = manualIkTargets.Count == 1;
+            if (resetSolverPose)
+            {
+                finalIkRig?.FixTransforms();
+            }
+
+            manualIkTargets.Remove(target);
+            var targetTransform = id >= 0 && id < ikTargets.Length
+                ? ikTargets[id]
+                : null;
+            if (targetTransform != null)
+            {
+                targetTransform.localPosition = value.RestoreLocalPosition;
+                targetTransform.localRotation = value.RestoreLocalRotation;
+            }
+
+            UpdateKinematicState();
+            return true;
+        }
+
         public void SetKinematicMode(CharacterKinematicMode mode)
         {
             if (mode != CharacterKinematicMode.None && !SupportsMode(mode))
@@ -362,15 +430,18 @@ namespace StudioEditor.ReferenceModels
         private void OnDestroy()
         {
             initialized = false;
+            RestoreManualIkTargets();
             if (poseCoordinator != null)
             {
                 poseCoordinator.UnregisterModifier(fkModifier);
                 poseCoordinator.UnregisterModifier(ikModifier);
+                poseCoordinator.UnregisterModifier(finalIkModifier);
             }
 
             poseCoordinator = null;
             fkModifier = null;
             ikModifier = null;
+            finalIkModifier = null;
             finalIkRig?.Disable();
             finalIkRig = null;
         }
@@ -387,16 +458,11 @@ namespace StudioEditor.ReferenceModels
         {
             if (initialized)
             {
-                // Match SolverManager's order: clear the previous IK result in
-                // Update, then let Animator and Timeline establish this frame's
-                // pose before Final IK runs at the end of the pose pipeline.
+                // Clear the previous result before Animator and Timeline build
+                // this frame. Final IK then runs inside the pose pipeline after
+                // body constraints and control overrides.
                 finalIkRig?.FixTransforms();
             }
-        }
-
-        private void LateUpdate()
-        {
-            SolveFinalIk();
         }
 
         private void OnDisable()
@@ -511,16 +577,39 @@ namespace StudioEditor.ReferenceModels
                 poseCoordinator.RegisterModifier(ikModifier);
             }
 
+            if (finalIkRig != null)
+            {
+                finalIkModifier = new FinalIkModifier(this);
+                poseCoordinator.RegisterModifier(finalIkModifier);
+            }
+
             poseCoordinator.EvaluateNow();
-            SolveFinalIk();
         }
 
-        private void SolveFinalIk()
+        private bool IsFinalIkActive()
         {
-            if (initialized)
+            return finalIkRig != null &&
+                   (manualIkTargets.Count > 0 ||
+                    (activeKinematicModes &
+                     CharacterKinematicModes.InverseKinematics) != 0);
+        }
+
+        private void SolveFinalIk(CharacterPoseBuffer pose)
+        {
+            if (pose == null || !IsFinalIkActive() ||
+                !ReferenceEquals(pose.Skeleton, poseCoordinator.Skeleton))
             {
-                finalIkRig?.Solve();
+                return;
             }
+
+            pose.Apply();
+            if (manualIkTargets.Count > 0)
+            {
+                ApplyManualIkTargets();
+            }
+
+            finalIkRig.Solve();
+            pose.Capture();
         }
 
         private CharacterKinematicModes ResolveInitialModes(
@@ -1244,10 +1333,146 @@ namespace StudioEditor.ReferenceModels
         private void UpdateKinematicState()
         {
             UpdateFkPhysicsState();
-            finalIkRig?.SetState(
-                (activeKinematicModes &
-                 CharacterKinematicModes.InverseKinematics) != 0,
-                activeIk);
+            if (finalIkRig == null)
+            {
+                return;
+            }
+
+            var sourceIkActive = (activeKinematicModes &
+                                  CharacterKinematicModes.InverseKinematics) != 0;
+            for (var index = 0; index < effectiveIkGroups.Length; index++)
+            {
+                var group = IkGroupAt(index);
+                effectiveIkGroups[index] =
+                    sourceIkActive && IsActive(activeIk, index) ||
+                    IsManualIkGroupActive(group);
+            }
+
+            finalIkRig.SetState(
+                sourceIkActive || manualIkTargets.Count > 0,
+                effectiveIkGroups);
+        }
+
+        private bool IsManualIkGroupActive(CharacterKinematicGroups group)
+        {
+            foreach (var pair in manualIkTargets)
+            {
+                if (ManualIkGroupFor(pair.Key) == group)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void ApplyManualIkTargets()
+        {
+            foreach (var pair in manualIkTargets)
+            {
+                ApplyManualIkTarget(pair.Key, pair.Value);
+            }
+        }
+
+        private void ApplyManualIkTarget(
+            CharacterFullBodyIkTarget target,
+            ManualIkTarget value)
+        {
+            if (!TryGetManualIkTargetId(target, out var id) ||
+                id < 0 || id >= ikTargets.Length || ikTargets[id] == null)
+            {
+                return;
+            }
+
+            ikTargets[id].position = value.WorldPosition;
+            if (ManualIkTargetUsesRotation(target))
+            {
+                ikTargets[id].rotation = value.WorldRotation;
+            }
+        }
+
+        private void RestoreManualIkTargets()
+        {
+            foreach (var pair in manualIkTargets)
+            {
+                if (!TryGetManualIkTargetId(pair.Key, out var id) ||
+                    id < 0 || id >= ikTargets.Length || ikTargets[id] == null)
+                {
+                    continue;
+                }
+
+                ikTargets[id].localPosition = pair.Value.RestoreLocalPosition;
+                ikTargets[id].localRotation = pair.Value.RestoreLocalRotation;
+            }
+
+            manualIkTargets.Clear();
+        }
+
+        private static bool TryGetManualIkTargetId(
+            CharacterFullBodyIkTarget target,
+            out int id)
+        {
+            switch (target)
+            {
+                case CharacterFullBodyIkTarget.LeftElbow:
+                    id = 2;
+                    return true;
+                case CharacterFullBodyIkTarget.LeftHand:
+                    id = 3;
+                    return true;
+                case CharacterFullBodyIkTarget.RightElbow:
+                    id = 5;
+                    return true;
+                case CharacterFullBodyIkTarget.RightHand:
+                    id = 6;
+                    return true;
+                case CharacterFullBodyIkTarget.LeftKnee:
+                    id = 8;
+                    return true;
+                case CharacterFullBodyIkTarget.LeftFoot:
+                    id = 9;
+                    return true;
+                case CharacterFullBodyIkTarget.RightKnee:
+                    id = 11;
+                    return true;
+                case CharacterFullBodyIkTarget.RightFoot:
+                    id = 12;
+                    return true;
+                default:
+                    id = -1;
+                    return false;
+            }
+        }
+
+        private static CharacterKinematicGroups ManualIkGroupFor(
+            CharacterFullBodyIkTarget target)
+        {
+            switch (target)
+            {
+                case CharacterFullBodyIkTarget.LeftElbow:
+                case CharacterFullBodyIkTarget.LeftHand:
+                    return CharacterKinematicGroups.LeftHand;
+                case CharacterFullBodyIkTarget.RightElbow:
+                case CharacterFullBodyIkTarget.RightHand:
+                    return CharacterKinematicGroups.RightHand;
+                case CharacterFullBodyIkTarget.LeftKnee:
+                case CharacterFullBodyIkTarget.LeftFoot:
+                    return CharacterKinematicGroups.LeftLeg;
+                case CharacterFullBodyIkTarget.RightKnee:
+                case CharacterFullBodyIkTarget.RightFoot:
+                    return CharacterKinematicGroups.RightLeg;
+                default:
+                    return CharacterKinematicGroups.None;
+            }
+        }
+
+        private static bool ManualIkTargetUsesRotation(
+            CharacterFullBodyIkTarget target)
+        {
+            return target == CharacterFullBodyIkTarget.LeftHand ||
+                   target == CharacterFullBodyIkTarget.RightHand ||
+                   target == CharacterFullBodyIkTarget.LeftFoot ||
+                   target == CharacterFullBodyIkTarget.RightFoot;
         }
 
         private static bool TryGetFkGroupIndex(int group, out int index)
@@ -1395,6 +1620,27 @@ namespace StudioEditor.ReferenceModels
             public int GroupIndex { get; }
         }
 
+        private struct ManualIkTarget
+        {
+            public ManualIkTarget(
+                Vector3 restoreLocalPosition,
+                Quaternion restoreLocalRotation)
+            {
+                RestoreLocalPosition = restoreLocalPosition;
+                RestoreLocalRotation = restoreLocalRotation;
+                WorldPosition = Vector3.zero;
+                WorldRotation = Quaternion.identity;
+            }
+
+            public Vector3 RestoreLocalPosition { get; }
+
+            public Quaternion RestoreLocalRotation { get; }
+
+            public Vector3 WorldPosition { get; set; }
+
+            public Quaternion WorldRotation { get; set; }
+        }
+
         private sealed class PoseModifier : ICharacterPoseModifier
         {
             private readonly KoikatsuStudioCharacterPose owner;
@@ -1428,6 +1674,27 @@ namespace StudioEditor.ReferenceModels
                 {
                     owner.ApplyFk(pose);
                 }
+            }
+        }
+
+        private sealed class FinalIkModifier : ICharacterPoseModifier
+        {
+            private readonly KoikatsuStudioCharacterPose owner;
+
+            public FinalIkModifier(KoikatsuStudioCharacterPose owner)
+            {
+                this.owner = owner;
+            }
+
+            public int Order => CharacterPoseStages.FullBodyIk;
+
+            public bool Enabled => owner != null && owner.initialized &&
+                                   owner.isActiveAndEnabled &&
+                                   owner.IsFinalIkActive();
+
+            public void Evaluate(CharacterPoseBuffer pose)
+            {
+                owner.SolveFinalIk(pose);
             }
         }
     }

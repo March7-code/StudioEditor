@@ -27,8 +27,9 @@ Current foundation slice:
 - Action-editing layers run after imported animation, FK, IK, and Timeline.
 - Added format-independent kinematic control targets for hips, chest, head, wrists,
   and feet, plus elbow and knee pole targets. Shoulder targets are drafted but remain
-  disabled until pose inference and clavicle limits are available. Wrist targets solve
-  the upper/lower arm chain only; finger bones remain owned by the imported pose.
+  disabled until pose inference and clavicle limits are available. Models that expose
+  full-body targets route wrists, feet, elbows, and knees to their native effectors and
+  bend goals; other models fall back to the analytic two-bone solver.
 - Selected positional controls expose world-space XYZ movement axes. Hips, chest,
   head, wrist, and foot targets also expose world-space XYZ rotation rings.
 - Eye-look control is intentionally deferred. Anime pupils are a source-specific
@@ -39,9 +40,16 @@ Current foundation slice:
 - Added an analytic body-collision modifier in the `BodyConstraints` stage. It fits
   conservative head, torso, and pelvis volumes, then projects elbow, hand, knee, foot,
   and limb-segment samples out of those volumes before writing corrected limb IK.
-- Control-point IK and body-collision correction now share one two-bone solver and one
-  humanoid chain configuration. Elbows and knees keep their bind-pose bend side and
-  use hard bend ranges of `2-165` and `2-155` degrees respectively.
+- Analytic control-point fallback and body-collision correction share one two-bone
+  solver and humanoid chain configuration. Limb joints use the full solvable bend
+  range without a bind-pose bend-side lock; the bind direction is only a singular-pose
+  fallback.
+- Active control-point channels are reapplied after body-collision correction, so a
+  manually positioned joint remains authoritative while uncontrolled limbs can still
+  receive passive collision correction.
+- Koikatsu characters with Final IK solve manual full-body effectors after passive body
+  correction. Hand and foot targets can therefore pull the body through the native
+  chain solver instead of clamping against a fixed shoulder or hip root.
 - The preliminary collision slice creates no Rigidbody, Joint, or Unity Collider and
   remains deterministic during Timeline seeking. Clothing, hair, fingers, the floor,
   limb-to-limb pairs, and inter-character collision remain excluded.

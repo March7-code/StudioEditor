@@ -1871,7 +1871,8 @@ namespace StudioEditor.ReferenceModels
         IReferenceModelSkeletonProvider,
         IReferenceModelVariantProvider,
         ICharacterModel,
-        ICharacterKinematicGroupController
+        ICharacterKinematicGroupController,
+        ICharacterFullBodyIkTargetController
     {
         private GameObject root;
         private IReadOnlyList<ReferenceModelBone> bones;
@@ -2036,6 +2037,27 @@ namespace StudioEditor.ReferenceModels
             }
 
             pose.SetGroupActive(mode, group, active);
+        }
+
+        public bool SupportsTarget(CharacterFullBodyIkTarget target)
+        {
+            return GetStudioPose()?.SupportsManualIkTarget(target) == true;
+        }
+
+        public bool SetTarget(
+            CharacterFullBodyIkTarget target,
+            Vector3 worldPosition,
+            Quaternion worldRotation)
+        {
+            return GetStudioPose()?.SetManualIkTarget(
+                       target,
+                       worldPosition,
+                       worldRotation) == true;
+        }
+
+        public bool ClearTarget(CharacterFullBodyIkTarget target)
+        {
+            return GetStudioPose()?.ClearManualIkTarget(target) == true;
         }
 
         private KoikatsuStudioCharacterPose GetStudioPose()

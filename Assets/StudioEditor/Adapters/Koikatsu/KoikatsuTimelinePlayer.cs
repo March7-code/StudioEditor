@@ -794,7 +794,6 @@ namespace StudioEditor.ReferenceModels
                 SampleDirectBindings(CurrentTime);
             }
 
-            nodeConstraints?.EvaluateNow();
             for (var index = 0; index < itemPoses.Count; index++)
             {
                 if (itemPoses[index] != null)
@@ -825,7 +824,27 @@ namespace StudioEditor.ReferenceModels
 
         private void EvaluatePosePipelines()
         {
-            nodeConstraints?.EvaluateNow();
+            EvaluateCharacterPosePipelines();
+            if (nodeConstraints != null)
+            {
+                // Constraint offsets are expressed in the parent's solved
+                // frame. Build that frame first, update linked IK targets,
+                // then solve the affected character pose from those targets.
+                nodeConstraints.EvaluateNow();
+                EvaluateCharacterPosePipelines();
+            }
+
+            for (var index = 0; index < itemPoses.Count; index++)
+            {
+                if (itemPoses[index] != null)
+                {
+                    itemPoses[index].EvaluateNow();
+                }
+            }
+        }
+
+        private void EvaluateCharacterPosePipelines()
+        {
             var evaluated = new HashSet<ICharacterPosePipeline>();
 
             for (var index = 0; index < characterModels.Count; index++)
@@ -842,14 +861,6 @@ namespace StudioEditor.ReferenceModels
                 if (pair.Key != null && evaluated.Add(pair.Key))
                 {
                     pair.Key.EvaluateNow();
-                }
-            }
-
-            for (var index = 0; index < itemPoses.Count; index++)
-            {
-                if (itemPoses[index] != null)
-                {
-                    itemPoses[index].EvaluateNow();
                 }
             }
         }

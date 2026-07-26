@@ -46,14 +46,6 @@ namespace StudioEditor.Characters.Kinematics
                 throw new ArgumentNullException(nameof(skeleton));
             }
 
-            var isElbow = midBone == HumanBodyBones.LeftLowerArm ||
-                          midBone == HumanBodyBones.RightLowerArm;
-            var isKnee = midBone == HumanBodyBones.LeftLowerLeg ||
-                         midBone == HumanBodyBones.RightLowerLeg;
-            var minimum = isElbow || isKnee ? 2f : 0f;
-            var maximum = isElbow ? 165f : isKnee ? 155f : 179f;
-            var preventReversal = isElbow || isKnee;
-
             var root = skeleton.Bones[rootIndex].Transform;
             var mid = skeleton.Bones[midIndex].Transform;
             var tip = skeleton.Bones[tipIndex].Transform;
@@ -82,9 +74,9 @@ namespace StudioEditor.Characters.Kinematics
                 ? Quaternion.Inverse(root.rotation) * bendDirection.normalized
                 : Vector3.zero;
             return new CharacterTwoBoneSettings(
-                minimum,
-                maximum,
-                preventReversal,
+                0f,
+                179f,
+                false,
                 rootLocalDirection);
         }
     }

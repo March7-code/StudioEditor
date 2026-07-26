@@ -514,7 +514,7 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
-        private void LateUpdate()
+        private void Update()
         {
             EvaluateNow();
         }
@@ -590,7 +590,19 @@ namespace StudioEditor.ReferenceModels
                     ReadSingle(node, "scaleChangeFactor", 1f),
                     ReadLocks(node, "positionLocks"),
                     ReadLocks(node, "rotationLocks"),
-                    ReadLocks(node, "scaleLocks")));
+                    ReadLocks(node, "scaleLocks"),
+                    ReadVector3(
+                        node,
+                        "originalParentPosition",
+                        parent.position),
+                    ReadQuaternion(
+                        node,
+                        "originalParentRotation",
+                        parent.rotation),
+                    ReadVector3(
+                        node,
+                        "originalParentScale",
+                        parent.lossyScale)));
             }
 
             return result;
@@ -601,37 +613,80 @@ namespace StudioEditor.ReferenceModels
             int objectIndex,
             string path)
         {
+            if (objectIndex == -2)
+            {
+                return ResolveTransformPath(Camera.main?.transform, path);
+            }
+
             if (objectIndex < 0 || objectIndex >= objects.Count ||
                 objects[objectIndex] == null)
             {
                 return null;
             }
 
-            var root = objects[objectIndex].transform;
+            return ResolveTransformPath(objects[objectIndex].transform, path);
+        }
+
+        private static Transform ResolveTransformPath(
+            Transform root,
+            string path)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
             if (string.IsNullOrEmpty(path))
             {
                 return root;
             }
 
-            var result = root.Find(path);
-            if (result != null || path.IndexOf('/') >= 0)
+            var normalized = path.Replace('\\', '/').Trim('/');
+            var result = root.Find(normalized);
+            if (result != null)
             {
                 return result;
             }
 
+            // Scene constraints store paths relative to Koikatsu's original
+            // character root (usually BodyTop/...). The reconstructed model
+            // preserves the bone chain but can omit one or more wrapper roots.
+            // Resolve the longest remaining suffix before falling back to a
+            // unique leaf name.
+            var segments = normalized.Split('/');
+            for (var start = 1; start < segments.Length; start++)
+            {
+                result = root.Find(string.Join(
+                    "/",
+                    segments,
+                    start,
+                    segments.Length - start));
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+
+            var leafName = segments[segments.Length - 1];
+            Transform unique = null;
             var descendants = root.GetComponentsInChildren<Transform>(true);
             for (var index = 0; index < descendants.Length; index++)
             {
                 if (string.Equals(
                         descendants[index].name,
-                        path,
+                        leafName,
                         StringComparison.Ordinal))
                 {
-                    return descendants[index];
+                    if (unique != null)
+                    {
+                        return null;
+                    }
+
+                    unique = descendants[index];
                 }
             }
 
-            return null;
+            return unique;
         }
 
         private static string ReadString(XmlNode node, string name)
@@ -777,7 +832,10 @@ namespace StudioEditor.ReferenceModels
                 float scaleFactor,
                 AxisLocks positionLocks,
                 AxisLocks rotationLocks,
-                AxisLocks scaleLocks)
+                AxisLocks scaleLocks,
+                Vector3 originalParentPosition,
+                Quaternion originalParentRotation,
+                Vector3 originalParentScale)
             {
                 this.parent = parent;
                 this.child = child;
@@ -797,9 +855,9 @@ namespace StudioEditor.ReferenceModels
                 this.positionLocks = positionLocks;
                 this.rotationLocks = rotationLocks;
                 this.scaleLocks = scaleLocks;
-                originalParentPosition = parent.position;
-                originalParentRotation = parent.rotation;
-                originalParentScale = parent.lossyScale;
+                this.originalParentPosition = originalParentPosition;
+                this.originalParentRotation = originalParentRotation;
+                this.originalParentScale = originalParentScale;
             }
 
             public void Evaluate()

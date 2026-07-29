@@ -121,6 +121,11 @@ export the loaded scene to FBX. Characters, props, and hierarchy are exported to
 the supported character pose portion of the imported Timeline is baked into an FBX take
 at the selected frame rate. A `.cascadeur.json` file beside the FBX records the character
 roots needed to distinguish multiple characters that use the same skeleton names.
+The bridge also writes one numbered `.qrigcasc` file per exported character. Each file
+maps the standard Koikatsu body, five three-joint fingers on each hand, and twist bones
+to that character's actual FBX node names, including any uniqueness suffixes assigned by
+the FBX exporter. During export, temporary zero-geometry skin markers ensure all Quick
+Rig joints are emitted as FBX skeleton nodes that Cascadeur can bind.
 
 After editing in Cascadeur, export an FBX while preserving the character hierarchy and
 bone names. Import that file from the same window, choose the source character, target

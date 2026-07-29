@@ -1,0 +1,581 @@
+{
+  "Document": [
+    {
+      "Title": "Body",
+      "Sections": [
+        {
+          "Section": "Body",
+          "Names": [
+            {
+              "Bone name": "pelvis",
+              "Joint name": "cf_j_hips",
+              "Joint path": []
+            },
+            {
+              "Bone name": "stomach",
+              "Joint name": "cf_j_spine01",
+              "Joint path": ["cf_j_hips"]
+            },
+            {
+              "Bone name": "chest",
+              "Joint name": "cf_j_spine03",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02"
+              ]
+            },
+            {
+              "Bone name": "neck",
+              "Joint name": "cf_j_neck",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03"
+              ]
+            },
+            {
+              "Bone name": "head",
+              "Joint name": "cf_j_head",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_j_neck"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Left arm",
+          "Names": [
+            {
+              "Bone name": "clavicle_l",
+              "Joint name": "cf_j_shoulder_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_L"
+              ]
+            },
+            {
+              "Bone name": "arm_l",
+              "Joint name": "cf_j_arm00_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_L",
+                "cf_j_shoulder_L"
+              ]
+            },
+            {
+              "Bone name": "forearm_l",
+              "Joint name": "cf_j_forearm01_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_L",
+                "cf_j_shoulder_L",
+                "cf_j_arm00_L"
+              ]
+            },
+            {
+              "Bone name": "hand_l",
+              "Joint name": "cf_j_hand_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_L",
+                "cf_j_shoulder_L",
+                "cf_j_arm00_L",
+                "cf_j_forearm01_L"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Right arm",
+          "Names": [
+            {
+              "Bone name": "clavicle_r",
+              "Joint name": "cf_j_shoulder_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_R"
+              ]
+            },
+            {
+              "Bone name": "arm_r",
+              "Joint name": "cf_j_arm00_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_R",
+                "cf_j_shoulder_R"
+              ]
+            },
+            {
+              "Bone name": "forearm_r",
+              "Joint name": "cf_j_forearm01_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_R",
+                "cf_j_shoulder_R",
+                "cf_j_arm00_R"
+              ]
+            },
+            {
+              "Bone name": "hand_r",
+              "Joint name": "cf_j_hand_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_R",
+                "cf_j_shoulder_R",
+                "cf_j_arm00_R",
+                "cf_j_forearm01_R"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Left leg",
+          "Names": [
+            {
+              "Bone name": "thigh_l",
+              "Joint name": "cf_j_thigh00_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02"
+              ]
+            },
+            {
+              "Bone name": "calf_l",
+              "Joint name": "cf_j_leg01_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_L"
+              ]
+            },
+            {
+              "Bone name": "foot_l",
+              "Joint name": "cf_j_foot_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_L",
+                "cf_j_leg01_L",
+                "cf_j_leg03_L"
+              ]
+            },
+            {
+              "Bone name": "toe_l",
+              "Joint name": "cf_j_toes_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_L",
+                "cf_j_leg01_L",
+                "cf_j_leg03_L",
+                "cf_j_foot_L"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Right leg",
+          "Names": [
+            {
+              "Bone name": "thigh_r",
+              "Joint name": "cf_j_thigh00_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02"
+              ]
+            },
+            {
+              "Bone name": "calf_r",
+              "Joint name": "cf_j_leg01_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_R"
+              ]
+            },
+            {
+              "Bone name": "foot_r",
+              "Joint name": "cf_j_foot_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_R",
+                "cf_j_leg01_R",
+                "cf_j_leg03_R"
+              ]
+            },
+            {
+              "Bone name": "toe_r",
+              "Joint name": "cf_j_toes_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_R",
+                "cf_j_leg01_R",
+                "cf_j_leg03_R",
+                "cf_j_foot_R"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "Title": "Left hand",
+      "Sections": [
+        {
+          "Section": "Thumb",
+          "Names": [
+            {
+              "Bone name": "thumb_l_1",
+              "Joint name": "cf_j_thumb01_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L"]
+            },
+            {
+              "Bone name": "thumb_l_2",
+              "Joint name": "cf_j_thumb02_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_thumb01_L"]
+            },
+            {
+              "Bone name": "thumb_l_3",
+              "Joint name": "cf_j_thumb03_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_thumb01_L", "cf_j_thumb02_L"]
+            }
+          ]
+        },
+        {
+          "Section": "Index finger",
+          "Names": [
+            {
+              "Bone name": "index_finger_l_1",
+              "Joint name": "cf_j_index01_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L"]
+            },
+            {
+              "Bone name": "index_finger_l_2",
+              "Joint name": "cf_j_index02_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_index01_L"]
+            },
+            {
+              "Bone name": "index_finger_l_3",
+              "Joint name": "cf_j_index03_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_index01_L", "cf_j_index02_L"]
+            }
+          ]
+        },
+        {
+          "Section": "Middle finger",
+          "Names": [
+            {
+              "Bone name": "middle_finger_l_1",
+              "Joint name": "cf_j_middle01_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L"]
+            },
+            {
+              "Bone name": "middle_finger_l_2",
+              "Joint name": "cf_j_middle02_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_middle01_L"]
+            },
+            {
+              "Bone name": "middle_finger_l_3",
+              "Joint name": "cf_j_middle03_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_middle01_L", "cf_j_middle02_L"]
+            }
+          ]
+        },
+        {
+          "Section": "Ring finger",
+          "Names": [
+            {
+              "Bone name": "ring_finger_l_1",
+              "Joint name": "cf_j_ring01_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L"]
+            },
+            {
+              "Bone name": "ring_finger_l_2",
+              "Joint name": "cf_j_ring02_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_ring01_L"]
+            },
+            {
+              "Bone name": "ring_finger_l_3",
+              "Joint name": "cf_j_ring03_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_ring01_L", "cf_j_ring02_L"]
+            }
+          ]
+        },
+        {
+          "Section": "Pinky",
+          "Names": [
+            {
+              "Bone name": "pinky_l_1",
+              "Joint name": "cf_j_little01_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L"]
+            },
+            {
+              "Bone name": "pinky_l_2",
+              "Joint name": "cf_j_little02_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_little01_L"]
+            },
+            {
+              "Bone name": "pinky_l_3",
+              "Joint name": "cf_j_little03_L",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_L", "cf_j_shoulder_L", "cf_j_arm00_L", "cf_j_forearm01_L", "cf_j_hand_L", "cf_s_hand_L", "cf_j_little01_L", "cf_j_little02_L"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "Title": "Right hand",
+      "Sections": [
+        {
+          "Section": "Thumb",
+          "Names": [
+            {
+              "Bone name": "thumb_r_1",
+              "Joint name": "cf_j_thumb01_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R"]
+            },
+            {
+              "Bone name": "thumb_r_2",
+              "Joint name": "cf_j_thumb02_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_thumb01_R"]
+            },
+            {
+              "Bone name": "thumb_r_3",
+              "Joint name": "cf_j_thumb03_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_thumb01_R", "cf_j_thumb02_R"]
+            }
+          ]
+        },
+        {
+          "Section": "Index finger",
+          "Names": [
+            {
+              "Bone name": "index_finger_r_1",
+              "Joint name": "cf_j_index01_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R"]
+            },
+            {
+              "Bone name": "index_finger_r_2",
+              "Joint name": "cf_j_index02_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_index01_R"]
+            },
+            {
+              "Bone name": "index_finger_r_3",
+              "Joint name": "cf_j_index03_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_index01_R", "cf_j_index02_R"]
+            }
+          ]
+        },
+        {
+          "Section": "Middle finger",
+          "Names": [
+            {
+              "Bone name": "middle_finger_r_1",
+              "Joint name": "cf_j_middle01_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R"]
+            },
+            {
+              "Bone name": "middle_finger_r_2",
+              "Joint name": "cf_j_middle02_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_middle01_R"]
+            },
+            {
+              "Bone name": "middle_finger_r_3",
+              "Joint name": "cf_j_middle03_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_middle01_R", "cf_j_middle02_R"]
+            }
+          ]
+        },
+        {
+          "Section": "Ring finger",
+          "Names": [
+            {
+              "Bone name": "ring_finger_r_1",
+              "Joint name": "cf_j_ring01_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R"]
+            },
+            {
+              "Bone name": "ring_finger_r_2",
+              "Joint name": "cf_j_ring02_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_ring01_R"]
+            },
+            {
+              "Bone name": "ring_finger_r_3",
+              "Joint name": "cf_j_ring03_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_ring01_R", "cf_j_ring02_R"]
+            }
+          ]
+        },
+        {
+          "Section": "Pinky",
+          "Names": [
+            {
+              "Bone name": "pinky_r_1",
+              "Joint name": "cf_j_little01_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R"]
+            },
+            {
+              "Bone name": "pinky_r_2",
+              "Joint name": "cf_j_little02_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_little01_R"]
+            },
+            {
+              "Bone name": "pinky_r_3",
+              "Joint name": "cf_j_little03_R",
+              "Joint path": ["cf_j_hips", "cf_j_spine01", "cf_j_spine02", "cf_j_spine03", "cf_d_shoulder_R", "cf_j_shoulder_R", "cf_j_arm00_R", "cf_j_forearm01_R", "cf_j_hand_R", "cf_s_hand_R", "cf_j_little01_R", "cf_j_little02_R"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "Title": "Twist bones",
+      "Sections": [
+        {
+          "Section": "Left arm",
+          "Names": [
+            {
+              "Bone name": "arm_l",
+              "Joint name": "cf_d_arm01_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_L",
+                "cf_j_shoulder_L",
+                "cf_j_arm00_L"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Left arm",
+          "Names": [
+            {
+              "Bone name": "forearm_l",
+              "Joint name": "cf_d_forearm02_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_L",
+                "cf_j_shoulder_L",
+                "cf_j_arm00_L",
+                "cf_j_forearm01_L"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Right arm",
+          "Names": [
+            {
+              "Bone name": "arm_r",
+              "Joint name": "cf_d_arm01_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_R",
+                "cf_j_shoulder_R",
+                "cf_j_arm00_R"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Right arm",
+          "Names": [
+            {
+              "Bone name": "forearm_r",
+              "Joint name": "cf_d_forearm02_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_spine01",
+                "cf_j_spine02",
+                "cf_j_spine03",
+                "cf_d_shoulder_R",
+                "cf_j_shoulder_R",
+                "cf_j_arm00_R",
+                "cf_j_forearm01_R"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Left leg",
+          "Names": [
+            {
+              "Bone name": "thigh_l",
+              "Joint name": "cf_d_thigh01_L",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_L"
+              ]
+            }
+          ]
+        },
+        {
+          "Section": "Right leg",
+          "Names": [
+            {
+              "Bone name": "thigh_r",
+              "Joint name": "cf_d_thigh01_R",
+              "Joint path": [
+                "cf_j_hips",
+                "cf_j_waist01",
+                "cf_j_waist02",
+                "cf_j_thigh00_R"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

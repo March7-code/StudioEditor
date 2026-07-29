@@ -5,6 +5,7 @@
     "StudioEditor.Runtime",
     "StudioEditor.Characters",
     "StudioEditor.Adapter.Koikatsu",
+    "Autodesk.Fbx",
     "Unity.Formats.Fbx.Editor"
   ],
   "includePlatforms": [

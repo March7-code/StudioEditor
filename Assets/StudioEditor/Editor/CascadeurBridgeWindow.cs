@@ -84,6 +84,7 @@ namespace StudioEditor.Editor
                 {
                     ExportScene();
                 }
+
             }
         }
 
@@ -230,6 +231,8 @@ namespace StudioEditor.Editor
 
             AnimationClip bakedClip = null;
             Animation temporaryAnimation = null;
+            FbxSkeletonMarkerScope skeletonMarkers = null;
+            FbxMeshSanitizationScope meshSanitization = null;
             var createdAnimation = false;
             var previousTime = timeline?.CurrentTime ?? 0f;
             var wasPlaying = timeline?.IsPlaying ?? false;
@@ -266,6 +269,10 @@ namespace StudioEditor.Editor
                     EmbedTextures = false,
                     ObjectPosition = ObjectPosition.LocalCentered,
                 };
+                skeletonMarkers = FbxSkeletonMarkerScope.Create(
+                    controller.CharacterModels);
+                meshSanitization = FbxMeshSanitizationScope.Create(
+                    controller.Current.Root);
                 status = "Exporting the loaded scene to FBX...";
                 var result = ModelExporter.ExportObject(
                     path,
@@ -280,13 +287,23 @@ namespace StudioEditor.Editor
                     controller,
                     exportFrameRate,
                     bakedClip != null ? timeline.Duration : 0f);
+                var quickRigCount = GenerateQuickRigConfigs(
+                    path,
+                    controller.CharacterModels,
+                    manifest.characters);
                 manifestPath = Path.ChangeExtension(path, ".cascadeur.json");
                 File.WriteAllText(
                     manifestPath,
                     JsonUtility.ToJson(manifest, true));
                 EditorPrefs.SetString(LastManifestKey, manifestPath);
                 status = $"Exported {controller.CharacterModels.Count} character(s) " +
-                         $"and scene references to {path}.";
+                         $"and scene references to {path}. Generated " +
+                         $"{quickRigCount}/{controller.CharacterModels.Count} " +
+                         "character Quick Rig config(s)." +
+                         (meshSanitization.RemovedSubmeshCount > 0
+                             ? $" Skipped {meshSanitization.RemovedSubmeshCount} " +
+                               "line/point submesh(es)."
+                             : string.Empty);
                 EditorUtility.RevealInFinder(path);
             }
             catch (Exception exception)
@@ -296,6 +313,8 @@ namespace StudioEditor.Editor
             }
             finally
             {
+                meshSanitization?.Dispose();
+                skeletonMarkers?.Dispose();
                 if (temporaryAnimation != null && bakedClip != null)
                 {
                     temporaryAnimation.RemoveClip(bakedClip);
@@ -617,6 +636,48 @@ namespace StudioEditor.Editor
             };
         }
 
+        private static int GenerateQuickRigConfigs(
+            string fbxPath,
+            IReadOnlyList<ICharacterModel> characters,
+            IReadOnlyList<CascadeurCharacterManifest> characterManifests)
+        {
+            QuickRigGenerationResult[] results;
+            try
+            {
+                results = CascadeurQuickRigGenerator.Generate(fbxPath, characters);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    $"Cascadeur Quick Rig generation failed: {exception.Message}");
+                return 0;
+            }
+
+            var succeeded = 0;
+            for (var index = 0; index < results.Length; index++)
+            {
+                var result = results[index];
+                if (!result.Succeeded)
+                {
+                    Debug.LogWarning(
+                        $"Cascadeur Quick Rig generation failed for character " +
+                        $"{result.CharacterIndex + 1}: {result.Error}");
+                    continue;
+                }
+
+                if (result.CharacterIndex >= 0 &&
+                    result.CharacterIndex < characterManifests.Count)
+                {
+                    characterManifests[result.CharacterIndex].quickRigFile =
+                        Path.GetFileName(result.FilePath);
+                }
+
+                succeeded++;
+            }
+
+            return succeeded;
+        }
+
         private static Dictionary<string, CharacterPoseChannels>
             GetAnimatedPaths(AnimationClip clip)
         {
@@ -711,7 +772,7 @@ namespace StudioEditor.Editor
 
         private static SceneContentController FindSceneController()
         {
-            return FindFirstObjectByType<SceneContentController>();
+            return FindAnyObjectByType<SceneContentController>();
         }
 
         private static string[] BuildTargetNames(
@@ -836,6 +897,7 @@ namespace StudioEditor.Editor
             public int index;
             public string displayName;
             public string rootPath;
+            public string quickRigFile;
         }
 
         private sealed class TransformCurves
@@ -918,6 +980,404 @@ namespace StudioEditor.Editor
                         typeof(Transform),
                         property),
                     curve);
+            }
+        }
+
+        private sealed class FbxSkeletonMarkerScope : IDisposable
+        {
+            private readonly List<GameObject> markers = new List<GameObject>();
+            private readonly List<Mesh> meshes = new List<Mesh>();
+
+            public static FbxSkeletonMarkerScope Create(
+                IReadOnlyList<ICharacterModel> characters)
+            {
+                var scope = new FbxSkeletonMarkerScope();
+                try
+                {
+                    for (var index = 0; index < characters.Count; index++)
+                    {
+                        scope.AddMarker(characters[index], index);
+                    }
+
+                    return scope;
+                }
+                catch
+                {
+                    scope.Dispose();
+                    throw;
+                }
+            }
+
+            public void Dispose()
+            {
+                for (var index = markers.Count - 1; index >= 0; index--)
+                {
+                    if (markers[index] != null)
+                    {
+                        DestroyImmediate(markers[index]);
+                    }
+                }
+
+                for (var index = meshes.Count - 1; index >= 0; index--)
+                {
+                    if (meshes[index] != null)
+                    {
+                        DestroyImmediate(meshes[index]);
+                    }
+                }
+
+                markers.Clear();
+                meshes.Clear();
+            }
+
+            private void AddMarker(ICharacterModel character, int characterIndex)
+            {
+                if (character?.Root == null || character.Skeleton == null ||
+                    !character.Skeleton.TryGetBone(
+                        HumanBodyBones.Hips,
+                        out var hips) ||
+                    hips.Transform == null)
+                {
+                    throw new InvalidOperationException(
+                        "A character has no humanoid skeleton for FBX export.");
+                }
+
+                var bones = new List<Transform>();
+                var seen = new HashSet<Transform>();
+                var descendants = hips.Transform.GetComponentsInChildren<
+                    Transform>(true);
+                for (var index = 0; index < descendants.Length; index++)
+                {
+                    var transform = descendants[index];
+                    if (CascadeurQuickRigGenerator.IsCanonicalJointName(
+                            transform.name) &&
+                        seen.Add(transform))
+                    {
+                        bones.Add(transform);
+                    }
+                }
+
+                var identifier = new GameObject(
+                    CascadeurQuickRigGenerator.GetCharacterMarkerName(
+                        characterIndex));
+                identifier.transform.SetParent(hips.Transform, false);
+                bones.Add(identifier.transform);
+                markers.Add(identifier);
+
+                var marker = new GameObject("Cascadeur Body Skeleton Marker");
+                markers.Add(marker);
+                marker.transform.SetParent(character.Root.transform, false);
+                var mesh = new Mesh
+                {
+                    name = "Cascadeur Body Skeleton Marker",
+                    bindposes = BuildBindPoses(marker.transform, bones),
+                    bounds = new Bounds(Vector3.zero, Vector3.one * 0.001f),
+                };
+                meshes.Add(mesh);
+                mesh.subMeshCount = 0;
+                var renderer = marker.AddComponent<SkinnedMeshRenderer>();
+                renderer.sharedMesh = mesh;
+                renderer.bones = bones.ToArray();
+                renderer.rootBone = hips.Transform;
+                renderer.enabled = false;
+            }
+
+            private static Matrix4x4[] BuildBindPoses(
+                Transform meshTransform,
+                IReadOnlyList<Transform> bones)
+            {
+                var result = new Matrix4x4[bones.Count];
+                for (var index = 0; index < bones.Count; index++)
+                {
+                    result[index] = bones[index].worldToLocalMatrix *
+                                    meshTransform.localToWorldMatrix;
+                }
+
+                return result;
+            }
+        }
+
+        private sealed class FbxMeshSanitizationScope : IDisposable
+        {
+            private readonly List<MeshFilterState> meshFilters =
+                new List<MeshFilterState>();
+            private readonly List<SkinnedMeshState> skinnedMeshes =
+                new List<SkinnedMeshState>();
+            private readonly List<Mesh> temporaryMeshes = new List<Mesh>();
+
+            public int RemovedSubmeshCount { get; private set; }
+
+            public static FbxMeshSanitizationScope Create(GameObject root)
+            {
+                var scope = new FbxMeshSanitizationScope();
+                try
+                {
+                    scope.Sanitize(root);
+                    return scope;
+                }
+                catch
+                {
+                    scope.Dispose();
+                    throw;
+                }
+            }
+
+            public void Dispose()
+            {
+                for (var index = meshFilters.Count - 1; index >= 0; index--)
+                {
+                    var state = meshFilters[index];
+                    if (state.Filter != null)
+                    {
+                        state.Filter.sharedMesh = state.Mesh;
+                    }
+
+                    if (state.Renderer != null)
+                    {
+                        state.Renderer.sharedMaterials = state.Materials;
+                    }
+                }
+
+                for (var index = skinnedMeshes.Count - 1; index >= 0; index--)
+                {
+                    var state = skinnedMeshes[index];
+                    if (state.Renderer == null)
+                    {
+                        continue;
+                    }
+
+                    state.Renderer.sharedMesh = state.Mesh;
+                    state.Renderer.sharedMaterials = state.Materials;
+                }
+
+                for (var index = temporaryMeshes.Count - 1; index >= 0; index--)
+                {
+                    if (temporaryMeshes[index] != null)
+                    {
+                        DestroyImmediate(temporaryMeshes[index]);
+                    }
+                }
+
+                meshFilters.Clear();
+                skinnedMeshes.Clear();
+                temporaryMeshes.Clear();
+            }
+
+            private void Sanitize(GameObject root)
+            {
+                var filters = root.GetComponentsInChildren<MeshFilter>(true);
+                for (var index = 0; index < filters.Length; index++)
+                {
+                    Sanitize(filters[index]);
+                }
+
+                var renderers = root.GetComponentsInChildren<
+                    SkinnedMeshRenderer>(true);
+                for (var index = 0; index < renderers.Length; index++)
+                {
+                    Sanitize(renderers[index]);
+                }
+            }
+
+            private void Sanitize(MeshFilter filter)
+            {
+                if (filter == null || filter.sharedMesh == null ||
+                    !TryCreateSupportedMesh(
+                        filter.sharedMesh,
+                        out var replacement,
+                        out var retainedSubmeshes,
+                        out var removed))
+                {
+                    return;
+                }
+
+                var renderer = filter.GetComponent<Renderer>();
+                var materials = renderer != null
+                    ? renderer.sharedMaterials
+                    : Array.Empty<Material>();
+                meshFilters.Add(new MeshFilterState(
+                    filter,
+                    filter.sharedMesh,
+                    renderer,
+                    materials));
+                filter.sharedMesh = replacement;
+                if (renderer != null && replacement != null)
+                {
+                    renderer.sharedMaterials = SelectMaterials(
+                        materials,
+                        retainedSubmeshes);
+                }
+
+                TrackReplacement(replacement, removed, filter.name);
+            }
+
+            private void Sanitize(SkinnedMeshRenderer renderer)
+            {
+                if (renderer == null || renderer.sharedMesh == null ||
+                    !TryCreateSupportedMesh(
+                        renderer.sharedMesh,
+                        out var replacement,
+                        out var retainedSubmeshes,
+                        out var removed))
+                {
+                    return;
+                }
+
+                var materials = renderer.sharedMaterials;
+                skinnedMeshes.Add(new SkinnedMeshState(
+                    renderer,
+                    renderer.sharedMesh,
+                    materials));
+                renderer.sharedMesh = replacement;
+                if (replacement != null)
+                {
+                    renderer.sharedMaterials = SelectMaterials(
+                        materials,
+                        retainedSubmeshes);
+                }
+
+                TrackReplacement(replacement, removed, renderer.name);
+            }
+
+            private void TrackReplacement(
+                Mesh replacement,
+                int removed,
+                string objectName)
+            {
+                RemovedSubmeshCount += removed;
+                if (replacement != null)
+                {
+                    temporaryMeshes.Add(replacement);
+                }
+
+                Debug.LogWarning(
+                    $"Cascadeur FBX export omitted {removed} unsupported " +
+                    $"line/point submesh(es) from '{objectName}'.");
+            }
+
+            private static bool TryCreateSupportedMesh(
+                Mesh source,
+                out Mesh replacement,
+                out int[] retainedSubmeshes,
+                out int removed)
+            {
+                var retained = new List<int>();
+                for (var index = 0; index < source.subMeshCount; index++)
+                {
+                    var topology = source.GetTopology(index);
+                    if (topology == MeshTopology.Triangles ||
+                        topology == MeshTopology.Quads)
+                    {
+                        retained.Add(index);
+                    }
+                }
+
+                removed = source.subMeshCount - retained.Count;
+                retainedSubmeshes = retained.ToArray();
+                if (removed == 0)
+                {
+                    replacement = null;
+                    return false;
+                }
+
+                if (retained.Count == 0)
+                {
+                    replacement = null;
+                    return true;
+                }
+
+                replacement = null;
+                try
+                {
+                    replacement = Instantiate(source);
+                    replacement.name = source.name + " - FBX Triangles";
+                    replacement.hideFlags = HideFlags.HideAndDontSave;
+                    replacement.subMeshCount = retained.Count;
+                    for (var index = 0; index < retained.Count; index++)
+                    {
+                        var sourceIndex = retained[index];
+                        replacement.SetIndices(
+                            source.GetIndices(sourceIndex, false),
+                            source.GetTopology(sourceIndex),
+                            index,
+                            false,
+                            checked((int)source.GetBaseVertex(sourceIndex)));
+                    }
+
+                    replacement.bounds = source.bounds;
+                    return true;
+                }
+                catch (Exception exception)
+                {
+                    if (replacement != null)
+                    {
+                        DestroyImmediate(replacement);
+                    }
+
+                    replacement = null;
+                    Debug.LogWarning(
+                        $"Could not copy supported submeshes from '{source.name}'. " +
+                        $"The mesh will be omitted from FBX export. {exception.Message}");
+                    return true;
+                }
+            }
+
+            private static Material[] SelectMaterials(
+                Material[] source,
+                IReadOnlyList<int> retainedSubmeshes)
+            {
+                var result = new Material[retainedSubmeshes.Count];
+                for (var index = 0; index < retainedSubmeshes.Count; index++)
+                {
+                    var sourceIndex = retainedSubmeshes[index];
+                    result[index] = sourceIndex >= 0 && sourceIndex < source.Length
+                        ? source[sourceIndex]
+                        : null;
+                }
+
+                return result;
+            }
+
+            private readonly struct MeshFilterState
+            {
+                public MeshFilterState(
+                    MeshFilter filter,
+                    Mesh mesh,
+                    Renderer renderer,
+                    Material[] materials)
+                {
+                    Filter = filter;
+                    Mesh = mesh;
+                    Renderer = renderer;
+                    Materials = materials;
+                }
+
+                public MeshFilter Filter { get; }
+
+                public Mesh Mesh { get; }
+
+                public Renderer Renderer { get; }
+
+                public Material[] Materials { get; }
+            }
+
+            private readonly struct SkinnedMeshState
+            {
+                public SkinnedMeshState(
+                    SkinnedMeshRenderer renderer,
+                    Mesh mesh,
+                    Material[] materials)
+                {
+                    Renderer = renderer;
+                    Mesh = mesh;
+                    Materials = materials;
+                }
+
+                public SkinnedMeshRenderer Renderer { get; }
+
+                public Mesh Mesh { get; }
+
+                public Material[] Materials { get; }
             }
         }
     }

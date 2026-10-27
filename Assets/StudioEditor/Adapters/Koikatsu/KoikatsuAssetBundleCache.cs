@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace StudioEditor.ReferenceModels
@@ -41,6 +43,83 @@ namespace StudioEditor.ReferenceModels
 
             entry.ReferenceCount++;
             return new KoikatsuAssetBundleLease(key, entry.Bundle);
+        }
+
+        public static async Task<KoikatsuAssetBundleLease> AcquireAsync(
+            KoikatsuBundleSource source, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            StudioEditorDiskCache.Initialize();
+            if (entries.ContainsKey(source.CacheKey)) return Acquire(source);
+            var preparedSource = source;
+            KoikatsuBundleSource prepared;
+            try { prepared = await Task.Run(() => KoikatsuLegacyBundleSanitizer.Prepare(preparedSource), token); }
+            catch (InvalidDataException) when (source.StreamOffset > 0 && !string.IsNullOrEmpty(source.FallbackArchiveEntryName))
+            {
+                preparedSource = new KoikatsuBundleSource(source.FilePath, 0, source.FallbackArchiveEntryName);
+                prepared = await Task.Run(() => KoikatsuLegacyBundleSanitizer.Prepare(preparedSource), token);
+            }
+            var bundle = await LoadPreparedAsync(prepared, token);
+            if (bundle == null && source.StreamOffset > 0 && !string.IsNullOrEmpty(source.FallbackArchiveEntryName) &&
+                string.IsNullOrEmpty(preparedSource.ArchiveEntryName))
+            {
+                preparedSource = new KoikatsuBundleSource(source.FilePath, 0, source.FallbackArchiveEntryName);
+                prepared = await Task.Run(() => KoikatsuLegacyBundleSanitizer.Prepare(preparedSource), token);
+                bundle = await LoadPreparedAsync(prepared, token);
+            }
+            if (bundle == null)
+            {
+                // Rebuild corrupt cached bundles once, without deleting game data.
+                await Task.Run(() => KoikatsuLegacyBundleSanitizer.Invalidate(preparedSource), token);
+                prepared = await Task.Run(() => KoikatsuLegacyBundleSanitizer.Prepare(preparedSource), token);
+                bundle = await LoadPreparedAsync(prepared, token);
+            }
+            if (bundle == null)
+                throw new InvalidDataException($"Unity could not load '{source.DisplayName}'.");
+            if (entries.TryGetValue(source.CacheKey, out var existing))
+            {
+                if (bundle != existing.Bundle) bundle.Unload(true);
+                return Acquire(source);
+            }
+            entries.Add(source.CacheKey, new Entry(bundle) { ReferenceCount = 1 });
+            return new KoikatsuAssetBundleLease(source.CacheKey, bundle);
+        }
+
+        private static async Task<AssetBundle> LoadPreparedAsync(KoikatsuBundleSource prepared, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            AssetBundleCreateRequest request;
+            if (string.IsNullOrEmpty(prepared.ArchiveEntryName))
+                request = AssetBundle.LoadFromFileAsync(prepared.FilePath, 0, (ulong)prepared.StreamOffset);
+            else
+            {
+                var bytes = await Task.Run(() => ReadArchiveEntry(prepared), token);
+                token.ThrowIfCancellationRequested();
+                request = AssetBundle.LoadFromMemoryAsync(bytes);
+            }
+            // Unity cannot cancel bundle creation. Drain it before releasing the
+            // loaded bundle, so cancellation cannot leak resources or race a retry.
+            while (!request.isDone) await Task.Yield();
+            var bundle = request.assetBundle;
+            if (token.IsCancellationRequested)
+            {
+                bundle?.Unload(true);
+                token.ThrowIfCancellationRequested();
+            }
+            return bundle;
+        }
+
+        private static byte[] ReadArchiveEntry(KoikatsuBundleSource source)
+        {
+            using (var file = File.OpenRead(source.FilePath))
+            using (var archive = new ZipArchive(file, ZipArchiveMode.Read))
+            {
+                var entry = archive.GetEntry(source.ArchiveEntryName);
+                if (entry == null) throw new InvalidDataException("Zipmod bundle entry is missing.");
+                using (var input = entry.Open())
+                using (var memory = new MemoryStream())
+                { input.CopyTo(memory); return memory.ToArray(); }
+            }
         }
 
         private static AssetBundle Load(KoikatsuBundleSource source)

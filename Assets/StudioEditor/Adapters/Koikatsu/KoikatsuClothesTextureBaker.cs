@@ -111,10 +111,23 @@ namespace StudioEditor.ReferenceModels
                 }
             }
 
-            var material = new Material(shader);
+            // Explicit blits can run the original texture creation pass in URP.
+            // Keep its pattern scale and color-mask math when that GPU program
+            // is supported; the converted character material consumes only the
+            // resulting texture, never the legacy forward rendering passes.
+            var sourceMaterial = textureLoader.LoadVanillaMaterial(
+                "chara/mm_base.unity3d", "cf_m_clothesN_create");
+            bool useSourceMaterial = sourceMaterial != null &&
+                sourceMaterial.shader != null && sourceMaterial.shader.isSupported &&
+                sourceMaterial.HasProperty("_ColorMask") &&
+                sourceMaterial.HasProperty("_PatternScale1u");
+            var material = useSourceMaterial
+                ? new Material(sourceMaterial)
+                : new Material(shader);
             try
             {
-                Configure(material, colors, patterns);
+                if (useSourceMaterial) ConfigureSourceMaterial(material, colors, patterns);
+                else Configure(material, colors, patterns);
                 var result = new KoikatsuBakedClothesTextures();
                 result.Main = BakeMap(
                     material,
@@ -141,6 +154,25 @@ namespace StudioEditor.ReferenceModels
             finally
             {
                 KoikatsuCharacterAssembler.DestroyRuntimeObject(material);
+            }
+        }
+
+        private static void ConfigureSourceMaterial(
+            Material material,
+            IReadOnlyList<KoikatsuCardClothesColor> colors,
+            IReadOnlyList<Texture2D> patterns)
+        {
+            for (var index = 0; index < 3; index++)
+            {
+                var number = index + 1;
+                var color = colors[index];
+                var tiling = color?.Tiling ?? Vector2.zero;
+                material.SetColor(index == 0 ? "_Color" : $"_Color{number}",
+                    color?.BaseColor ?? Color.white);
+                material.SetColor($"_Color{number}_2", color?.PatternColor ?? Color.white);
+                material.SetFloat($"_PatternScale{number}u", tiling.x);
+                material.SetFloat($"_PatternScale{number}v", tiling.y);
+                material.SetTexture($"_PatternMask{number}", patterns[index]);
             }
         }
 
@@ -196,24 +228,29 @@ namespace StudioEditor.ReferenceModels
             try
             {
                 GL.sRGBWrite = true;
+                // The original create_topN pass alpha-blends into the target.
+                // Match CustomTextureCreate: pooled pixels must not fill the
+                // source texture's transparent neckline and other cutouts.
+                RenderTexture.active = target;
+                GL.Clear(false, true, Color.clear);
                 Graphics.Blit(source, target, material, 0);
                 RenderTexture.active = target;
                 result = new Texture2D(
                     target.width,
                     target.height,
                     TextureFormat.RGBA32,
-                    false,
+                    true,
                     false)
                 {
                     name = name,
-                    filterMode = FilterMode.Bilinear,
+                    filterMode = FilterMode.Trilinear,
                     wrapMode = TextureWrapMode.Clamp,
                 };
                 result.ReadPixels(
                     new Rect(0f, 0f, target.width, target.height),
                     0,
                     0);
-                result.Apply(false, false);
+                result.Apply(true, false);
                 return result;
             }
             catch

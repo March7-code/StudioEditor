@@ -154,6 +154,17 @@ namespace StudioEditor.ReferenceModels
             KoikatsuStudioListEntry entry,
             KoikatsuStudioPatternTextures patterns)
         {
+            if (KoikatsuSceneMaterialUtility.UsesAdditiveColorChannels(material))
+            {
+                for (var channel = 0; channel < 3; channel++)
+                {
+                    if (!IsEnabled(entry.UseColors, channel)) continue;
+                    if (channel == 0) SetColor(material, item.Colors[channel]);
+                    else material.SetColor($"_Color{channel + 1}", item.Colors[channel]);
+                }
+                return true;
+            }
+            if (KoikatsuSceneMaterialUtility.IsEffect(material)) return false;
             var enabled = Vector4.zero;
             for (var channel = 0; channel < 3; channel++)
             {
@@ -334,6 +345,11 @@ namespace StudioEditor.ReferenceModels
 
         private static void SetAlpha(Material material, float alpha)
         {
+            if (KoikatsuSceneMaterialUtility.UsesAdditiveColorChannels(material))
+            {
+                material.SetFloat("_alpha", alpha);
+                return;
+            }
             var color = material.color;
             color.a = Mathf.Clamp01(alpha);
             SetColor(material, color);
@@ -354,6 +370,12 @@ namespace StudioEditor.ReferenceModels
 
         private static void SetTransparent(Material material)
         {
+            if (KoikatsuSceneMaterialUtility.IsEffect(material) &&
+                material.HasProperty("_Surface") && material.GetFloat("_Surface") > 0.5f)
+            {
+                // Changing an effect's opacity must retain its additive blend and queue.
+                return;
+            }
             material.SetOverrideTag("RenderType", "Transparent");
             if (material.HasProperty("_Surface"))
             {

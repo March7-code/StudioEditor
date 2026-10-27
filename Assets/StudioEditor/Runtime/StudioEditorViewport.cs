@@ -66,8 +66,8 @@ namespace StudioEditor.Viewport
             importController = GetComponent<SceneContentController>();
             importController.StateChanged += HandleImportStateChanged;
             StudioEditorSettings.Changed += HandleEditorSettingsChanged;
-            HandleEditorSettingsChanged();
             grid = new ViewportGrid(transform);
+            HandleEditorSettingsChanged();
             if (EnsureCamera())
             {
                 defaultViewportCamera = viewportCamera;
@@ -428,6 +428,7 @@ namespace StudioEditor.Viewport
         private void HandleEditorSettingsChanged()
         {
             StudioEditorSettings.ApplyTo(controls);
+            grid?.SetVisible(StudioEditorSettings.ShowGrid);
         }
     }
 
@@ -440,6 +441,7 @@ namespace StudioEditor.Viewport
         private readonly GridLayer majorLines;
         private readonly GridLayer xAxis;
         private readonly GridLayer zAxis;
+        private bool visible = true;
         private float currentStep = -1f;
         private Vector2 currentCenter = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
 
@@ -463,9 +465,18 @@ namespace StudioEditor.Viewport
                 new Color(0.22f, 0.39f, 0.68f, 1f));
         }
 
+        public void SetVisible(bool value)
+        {
+            visible = value;
+            minorLines?.SetVisible(value);
+            majorLines?.SetVisible(value);
+            xAxis?.SetVisible(value);
+            zAxis?.SetVisible(value);
+        }
+
         public void Refresh(Vector3 focus, float cameraDistance)
         {
-            if (minorLines == null)
+            if (!visible || minorLines == null)
             {
                 return;
             }
@@ -586,6 +597,11 @@ namespace StudioEditor.Viewport
             renderer.lightProbeUsage = LightProbeUsage.Off;
             renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
             renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+        }
+
+        public void SetVisible(bool value)
+        {
+            root.SetActive(value);
         }
 
         public void SetVertices(List<Vector3> vertices)

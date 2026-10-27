@@ -46,7 +46,7 @@ Shader "Hidden/StudioEditor/KoikatsuClothesBake"
 
             float2 PatternUv(float2 uv, float2 tiling)
             {
-                return uv * lerp(float2(1.0, 1.0), float2(20.0, 20.0),
+                return uv * lerp(float2(20.0, 20.0), float2(1.0, 1.0),
                                  saturate(tiling));
             }
 
@@ -54,14 +54,15 @@ Shader "Hidden/StudioEditor/KoikatsuClothesBake"
                 float2 uv,
                 sampler2D patternTexture,
                 float3 baseColor,
-                float3 patternColor,
+                float4 patternColor,
                 float2 tiling,
                 float hasPattern)
             {
-                float3 pattern = tex2D(
+                float pattern = tex2D(
                     patternTexture,
-                    PatternUv(uv, tiling)).rgb;
-                float3 patterned = lerp(baseColor, patternColor, pattern);
+                    PatternUv(uv, tiling)).r;
+                float3 patterned = lerp(patternColor.rgb, baseColor,
+                    max(pattern, 1 - patternColor.a));
                 return lerp(baseColor, patterned, hasPattern);
             }
 
@@ -73,28 +74,29 @@ Shader "Hidden/StudioEditor/KoikatsuClothesBake"
                     input.uv,
                     _Pattern1,
                     _ChannelColor1.rgb,
-                    _PatternColor1.rgb,
+                    _PatternColor1,
                     _PatternTiling1,
                     _HasPattern1);
                 float3 color2 = ChannelColor(
                     input.uv,
                     _Pattern2,
                     _ChannelColor2.rgb,
-                    _PatternColor2.rgb,
+                    _PatternColor2,
                     _PatternTiling2,
                     _HasPattern2);
                 float3 color3 = ChannelColor(
                     input.uv,
                     _Pattern3,
                     _ChannelColor3.rgb,
-                    _PatternColor3.rgb,
+                    _PatternColor3,
                     _PatternTiling3,
                     _HasPattern3);
 
-                float weight = mask.r + mask.g + mask.b;
-                float3 tint = (color1 * mask.r + color2 * mask.g +
-                               color3 * mask.b) / max(weight, 0.0001);
-                tint = lerp(float3(1.0, 1.0, 1.0), tint, saturate(weight));
+                // Match create_topN: black pattern texels receive the pattern
+                // color, and later color-mask channels replace earlier ones.
+                float3 tint = lerp(float3(1.0, 1.0, 1.0), color1, mask.r);
+                tint = lerp(tint, color2, mask.g);
+                tint = lerp(tint, color3, mask.b);
                 return float4(source.rgb * tint, source.a);
             }
             ENDHLSL

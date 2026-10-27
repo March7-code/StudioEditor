@@ -1,0 +1,6 @@
+{
+  "name": "StudioEditor.RenderScheme.ExperimentalAtmosphere.Editor",
+  "references": ["Unity.RenderPipelines.Core.Runtime", "Unity.UnifiedRayTracing.Runtime"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

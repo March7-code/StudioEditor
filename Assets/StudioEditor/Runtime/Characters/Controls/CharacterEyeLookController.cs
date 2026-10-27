@@ -82,6 +82,8 @@ namespace StudioEditor.Characters
 
         public float PupilVerticalTravel { get; set; } = 0.1f;
 
+        public bool UseSharedVerticalLookRate { get; set; }
+
         public float BendingThreshold { get; set; }
 
         public float MaxAngleDifference { get; set; }
@@ -91,6 +93,20 @@ namespace StudioEditor.Characters
         public int Order => CharacterPoseStages.EyeLook;
 
         public bool Enabled => isActiveAndEnabled;
+
+        public Vector2 GetLookRate(CharacterEye eye)
+        {
+            var state = eyes[EyeIndex(eye)];
+            if (state == null)
+            {
+                return Vector2.zero;
+            }
+
+            var vertical = UseSharedVerticalLookRate
+                ? eyes[0].VerticalRate
+                : state.VerticalRate;
+            return new Vector2(state.HorizontalRate, vertical);
+        }
 
         public void Configure(
             ICharacterPosePipeline requestedCoordinator,
@@ -241,12 +257,23 @@ namespace StudioEditor.Characters
             Quaternion left,
             Quaternion right)
         {
+            SetFixedLocalRotations(left, right, Vector2.zero, Vector2.zero);
+        }
+
+        public void SetFixedLocalRotations(
+            Quaternion left, Quaternion right, Vector2 leftLookRate, Vector2 rightLookRate)
+        {
             ValidateRotation(left, nameof(left));
             ValidateRotation(right, nameof(right));
+            if (!float.IsFinite(leftLookRate.x) || !float.IsFinite(leftLookRate.y) ||
+                !float.IsFinite(rightLookRate.x) || !float.IsFinite(rightLookRate.y))
+                throw new ArgumentException("Fixed eye rates must be finite.");
             eyes[0].FixedLocalRotation = left.normalized;
             eyes[0].HasFixedLocalRotation = true;
+            eyes[0].FixedLookRate = leftLookRate;
             eyes[1].FixedLocalRotation = right.normalized;
             eyes[1].HasFixedLocalRotation = true;
+            eyes[1].FixedLookRate = rightLookRate;
             isFollowingTarget = false;
             coordinator?.EvaluateNow();
         }
@@ -318,8 +345,8 @@ namespace StudioEditor.Characters
             if (!followsTarget)
             {
                 appliedDelta = desiredDelta;
-                appliedHorizontalRate = 0f;
-                appliedVerticalRate = 0f;
+                appliedHorizontalRate = usesFixedRotation ? eye.FixedLookRate.x : 0f;
+                appliedVerticalRate = usesFixedRotation ? eye.FixedLookRate.y : 0f;
             }
             else if (Response <= 0f || Time.deltaTime <= 0f)
             {
@@ -415,7 +442,7 @@ namespace StudioEditor.Characters
                 ? Mathf.Abs(UpAngleLimit)
                 : Mathf.Abs(DownAngleLimit);
             verticalRate = verticalLimit > 0.0001f
-                ? pitch / verticalLimit
+                ? -pitch / verticalLimit
                 : 0f;
             var pitchRotation = Quaternion.AngleAxis(pitch, right);
             var desiredForward = pitchRotation * yawForward;
@@ -489,7 +516,7 @@ namespace StudioEditor.Characters
                     continue;
                 }
 
-                var eye = eyes[EyeIndex(pupil.Eye)];
+                var lookRate = GetLookRate(pupil.Eye);
                 var scaleAdjustment = pupil.BaseScale - Vector2.one;
                 var centerCompensation = scaleAdjustment * -0.5f;
                 var baseMovement = pupil.BaseOffset - centerCompensation;
@@ -502,11 +529,11 @@ namespace StudioEditor.Characters
                     DivideMovement(
                         baseMovement.x,
                         horizontalTravel * movementScale.x) +
-                    eye.HorizontalRate,
+                    lookRate.x,
                     DivideMovement(
                         -baseMovement.y,
-                        verticalTravel * movementScale.y) -
-                    eye.VerticalRate);
+                        verticalTravel * movementScale.y) +
+                    lookRate.y);
                 if (lookInput.sqrMagnitude > 1f)
                 {
                     lookInput.Normalize();
@@ -672,6 +699,8 @@ namespace StudioEditor.Characters
             public bool HasOutput { get; set; }
 
             public Quaternion FixedLocalRotation { get; set; }
+
+            public Vector2 FixedLookRate { get; set; }
 
             public bool HasFixedLocalRotation { get; set; }
 

@@ -1,0 +1,6 @@
+{
+  "name": "StudioEditor.Rendering.URP",
+  "rootNamespace": "StudioEditor.Rendering",
+  "references": ["StudioEditor.Rendering", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
+  "autoReferenced": true
+}

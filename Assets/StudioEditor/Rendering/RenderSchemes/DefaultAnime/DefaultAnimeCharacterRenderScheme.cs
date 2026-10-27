@@ -142,9 +142,55 @@ namespace StudioEditor.Rendering.RenderSchemes
                 bandThresholds);
             SetFloat(material, "_BandSoftness", bandSoftness);
             SetFloat(material, "_AmbientStrength", ambientStrength);
+            SetFloat(material, "_StudioSurfaceRole", (float)context.Role);
             SetFloat(material, "_LightColorInfluence", lightColorInfluence);
             SetFloat(material, "_SpecularStrength", 0f);
             SetFloat(material, "_SpecularPower", specularPower);
+            var sourceShader = context.SourceMaterial?.shader?.name ?? string.Empty;
+            bool sourceClothes = context.Role == CharacterRenderSurfaceRole.Clothes &&
+                (sourceShader == "Shader Forge/main_opaque" || sourceShader == "Shader Forge/main_opaque_low");
+            bool sourceHair = context.Role == CharacterRenderSurfaceRole.Hair &&
+                sourceShader.StartsWith("Shader Forge/main_hair", StringComparison.Ordinal);
+            bool sourceBody = context.Role == CharacterRenderSurfaceRole.Skin &&
+                sourceShader == "Shader Forge/main_skin";
+            bool sourceFace = context.Role == CharacterRenderSurfaceRole.Face &&
+                !IsFaceDetail(context.MaterialKey) && sourceShader == "Shader Forge/main_skin";
+            bool sourceEyeWhite = context.Role == CharacterRenderSurfaceRole.Face &&
+                sourceShader == "Shader Forge/toon_eyew_lod0";
+            bool sourceIris = context.Role == CharacterRenderSurfaceRole.Face &&
+                sourceShader == "Shader Forge/toon_eye_lod0";
+            SetFloat(material, "_SourceCharacterModel", sourceClothes ? 1f : sourceHair ? 2f : sourceBody ? 3f : sourceFace ? 4f : sourceEyeWhite ? 5f : sourceIris ? 6f : 0f);
+            if (sourceEyeWhite || sourceIris)
+            {
+                // Eye shaders use lowercase _shadowcolor, independently of face skin.
+                SetColor(material, "_SourceShadowColor", FindColor(context.SourceMaterial, "_shadowcolor") ?? Color.white);
+            }
+            if (sourceClothes || sourceHair || sourceBody || sourceFace)
+            {
+                if (context.SourceMaterial.HasProperty("_AnotherRamp"))
+                {
+                    SetTexture(material, "_AnotherRamp", context.SourceMaterial.GetTexture("_AnotherRamp"));
+                    material.SetTextureScale("_AnotherRamp", context.SourceMaterial.GetTextureScale("_AnotherRamp"));
+                    material.SetTextureOffset("_AnotherRamp", context.SourceMaterial.GetTextureOffset("_AnotherRamp"));
+                }
+                SetColor(material, "_SourceShadowColor", FindColor(context.SourceMaterial, "_ShadowColor") ?? Color.gray);
+                SetFloat(material, "_SourceShadowExtend", FindFloat(context.SourceMaterial, 0.5f, "_ShadowExtend"));
+                SetFloat(material, "_SourceShadowExtendAnother", FindFloat(context.SourceMaterial, 0f, "_ShadowExtendAnother"));
+                SetFloat(material, "_SourceDetailRLineR", FindFloat(context.SourceMaterial, 0f, "_DetailRLineR"));
+            }
+            if (sourceClothes || sourceBody || sourceFace || sourceHair)
+            {
+                // The source uses a 0..1 strength here, not the generic shader's exponent.
+                SetFloat(material, "_SourceSpecularPower", FindFloat(context.SourceMaterial, 0f, "_SpecularPower"));
+                SetColor(material, "_SourceSpecularColor", FindColor(context.SourceMaterial, "_SpecularColor") ?? new Color(1, 1, 1, 0));
+                SetFloat(material, "_SourceSpecularHeight", FindFloat(context.SourceMaterial, .98f, "_SpeclarHeight"));
+                SetFloat(material, "_SourceRimPower", FindFloat(context.SourceMaterial, .5f, "_rimpower"));
+                SetFloat(material, "_SourceRimStrength", FindFloat(context.SourceMaterial, 0f, "_rimV"));
+                SetFloat(material, "_SourceDetailBLineG", FindFloat(context.SourceMaterial, 0f, "_DetailBLineG"));
+                SetFloat(material, "_SourceNotUseTextureSpecular", FindFloat(context.SourceMaterial, 0f, "_notusetexspecular"));
+            }
+            SetFloat(material, "_SourceHairLow", sourceShader == "Shader Forge/main_hair_low" ? 1f : 0f);
+            SetFloat(material, "_SourceHairFront", sourceShader == "Shader Forge/main_hair_front" ? 1f : 0f);
             SetFloat(material, "_RimStrength", 0f);
             SetFloat(material, "_RimPower", rimPower);
 
@@ -197,24 +243,12 @@ namespace StudioEditor.Rendering.RenderSchemes
                 material,
                 "_UseVertexColorChannels",
                 context.UseVertexColorChannels ? 1f : 0f);
+            SetFloat(material, "_UseColorMaskChannels", context.ColorMaskBlend != CharacterColorMaskBlend.None ? 1f : 0f);
+            SetFloat(material, "_ColorMaskBlendMode", context.ColorMaskBlend == CharacterColorMaskBlend.Sequential ? 1f : 0f);
             SetFloat(
                 material,
                 "_UseFlatColor",
                 IsFlatColorDetail(context.MaterialKey) ? 1f : 0f);
-            SetFloat(
-                material,
-                "_FaceSphereNormalBlend",
-                context.Role == CharacterRenderSurfaceRole.Face &&
-                !IsFaceDetail(context.MaterialKey)
-                    ? 0.85f
-                    : 0f);
-            SetFloat(
-                material,
-                "_FaceSphereLowerCylinder",
-                context.Role == CharacterRenderSurfaceRole.Face &&
-                !IsFaceDetail(context.MaterialKey)
-                    ? 1f
-                    : 0f);
             SetFloat(material, "_UseToon", 1f);
             if (context.HairGlossTexture != null)
             {

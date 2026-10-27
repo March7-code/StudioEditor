@@ -9,11 +9,13 @@ namespace StudioEditor.ReferenceModels
         public KoikatsuBakedEyeTexture(
             Texture2D texture,
             Vector2 scale,
-            Vector2 offset)
+            Vector2 offset,
+            Texture2D highlightMask = null)
         {
             Texture = texture;
             Scale = scale;
             Offset = offset;
+            HighlightMask = highlightMask;
         }
 
         public Texture2D Texture { get; }
@@ -21,6 +23,8 @@ namespace StudioEditor.ReferenceModels
         public Vector2 Scale { get; }
 
         public Vector2 Offset { get; }
+
+        public Texture2D HighlightMask { get; }
     }
 
     internal sealed class KoikatsuBakedEyeTextures
@@ -313,19 +317,6 @@ namespace StudioEditor.ReferenceModels
                     0,
                     $"Koikatsu Eye {(rightEye ? "R" : "L")} {pupil.Id}");
                 runtimeTextures.Add(texture);
-                if (originalCreateMaterial != null &&
-                    (highlightUp != null || highlightDown != null))
-                {
-                    texture = CompositeHighlights(
-                        shader,
-                        texture,
-                        highlightUp,
-                        highlightDown,
-                        face.Appearance,
-                        rotation,
-                        $"Koikatsu Eye {(rightEye ? "R" : "L")} Highlights");
-                    runtimeTextures.Add(texture);
-                }
                 texture = KoikatsuOverlayTextureBaker.Composite(
                     texture,
                     overlay,
@@ -337,7 +328,14 @@ namespace StudioEditor.ReferenceModels
                     rightEye,
                     out var scale,
                     out var offset);
-                return new KoikatsuBakedEyeTexture(texture, scale, offset);
+                // Share the iris UV in the runtime shader so gaze movement
+                // keeps the highlight visibility attached to the baked color.
+                var highlightMask = highlightUp != null || highlightDown != null
+                    ? CompositeHighlights(shader, texture, highlightUp, highlightDown,
+                        face.Appearance, rotation, $"Koikatsu Eye {(rightEye ? "R" : "L")} Highlight Mask")
+                    : null;
+                if (highlightMask != null) runtimeTextures.Add(highlightMask);
+                return new KoikatsuBakedEyeTexture(texture, scale, offset, highlightMask);
             }
             finally
             {
@@ -409,10 +407,9 @@ namespace StudioEditor.ReferenceModels
                 "_HighlightDownOffsetY",
                 Mathf.Lerp(0.1f, -0.1f, appearance.HighlightDownY));
             material.SetFloat("_HasGradient", gradient != null ? 1f : 0f);
-            material.SetFloat("_HasHighlightUp", highlightUp != null ? 1f : 0f);
-            material.SetFloat(
-                "_HasHighlightDown",
-                highlightDown != null ? 1f : 0f);
+            // Runtime eye shading composes expression first, then highlights.
+            material.SetFloat("_HasHighlightUp", 0f);
+            material.SetFloat("_HasHighlightDown", 0f);
             material.SetFloat("_Rotation", rotation);
         }
 
@@ -453,7 +450,7 @@ namespace StudioEditor.ReferenceModels
                     "_HasHighlightDown",
                     highlightDown != null ? 1f : 0f);
                 material.SetFloat("_Rotation", rotation);
-                return Render(material, source, 2, name);
+                return Render(material, source, 3, name);
             }
             finally
             {

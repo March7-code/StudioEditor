@@ -78,6 +78,7 @@ namespace StudioEditor.Characters
         private float openMax = 1f;
         private float maximumOpenMax = 1f;
         private float fixedOpenRate = -1f;
+        private float correctedOpenMax = -1f;
         private float transition = 1f;
 
         public int PatternCount => patternNames.Length;
@@ -91,6 +92,8 @@ namespace StudioEditor.Characters
         public float OpenMax => openMax;
 
         public float BlendDuration { get; set; } = 0.15f;
+
+        public bool QuantizeOpeningToPercent { get; set; }
 
         protected void ConfigureMorphs(
             IReadOnlyList<CharacterMorphTarget> requestedTargets,
@@ -144,6 +147,7 @@ namespace StudioEditor.Characters
             maximumOpenMax = Mathf.Clamp01(requestedOpenMax);
             openMax = maximumOpenMax;
             fixedOpenRate = -1f;
+            correctedOpenMax = -1f;
             transition = 1f;
             Apply();
         }
@@ -208,6 +212,11 @@ namespace StudioEditor.Characters
             Apply();
         }
 
+        protected void SetCorrectedOpenMax(float value)
+        {
+            correctedOpenMax = value < 0f ? -1f : Mathf.Clamp01(value);
+        }
+
         protected virtual void LateUpdate()
         {
             if (transition < 1f)
@@ -249,7 +258,9 @@ namespace StudioEditor.Characters
                 var currentWeight = Mathf.Clamp01(transition);
                 var effectiveOpenRate = fixedOpenRate >= 0f
                     ? fixedOpenRate
-                    : Mathf.Lerp(openMin, openMax, openRate);
+                    : Mathf.Lerp(openMin, correctedOpenMax >= 0f ? correctedOpenMax : openMax, openRate);
+                if (QuantizeOpeningToPercent)
+                    effectiveOpenRate = (int)Mathf.Clamp(effectiveOpenRate * 100f, 0f, 100f) / 100f;
                 ApplyPattern(
                     target,
                     pattern,
@@ -370,6 +381,35 @@ namespace StudioEditor.Characters
         CharacterPairedMorphController,
         ICharacterEyeOpenController
     {
+        private CharacterEyeLookController lookController;
+        private Vector3 lookCorrection;
+
+        public void SetLookController(CharacterEyeLookController look) => lookController = look;
+
+        public void ConfigureLookCorrection(CharacterEyeLookController look, Vector3 upDownSide)
+        {
+            lookController = look;
+            lookCorrection = upDownSide;
+        }
+
+        protected override void LateUpdate()
+        {
+            if (lookController != null)
+            {
+                var rate = lookController.GetLookRate(CharacterEye.Left);
+                var up = Mathf.Clamp01(lookCorrection.x);
+                var down = Mathf.Clamp01(lookCorrection.y);
+                var side = Mathf.Clamp01(lookCorrection.z);
+                var correction = rate.y > 0f ? up * Mathf.Sqrt(Mathf.Clamp01(rate.y))
+                    : -down * Mathf.Sqrt(Mathf.Clamp01(-rate.y));
+                correction -= side * Mathf.Sqrt(Mathf.Clamp01(Mathf.Abs(rate.x)));
+                correction = Mathf.Clamp(correction, -Mathf.Max(down, side), up);
+                SetCorrectedOpenMax(Mathf.Min(1f - up, OpenMax) + correction * OpenMax);
+            }
+            else SetCorrectedOpenMax(-1f);
+            base.LateUpdate();
+        }
+
         public void Configure(
             IReadOnlyList<CharacterMorphTarget> requestedTargets,
             IReadOnlyList<string> requestedPatternNames = null,
@@ -458,7 +498,9 @@ namespace StudioEditor.Characters
             coordinator.RegisterModifier(this);
         }
 
-        public int Order => CharacterPoseStages.ActionEditing;
+        // Studio evaluates the hand Animator before FK. Saved finger rotations
+        // must override a preset on an active FK hand group.
+        public int Order => CharacterPoseStages.HandPoses;
 
         public bool Enabled { get; set; } = true;
 

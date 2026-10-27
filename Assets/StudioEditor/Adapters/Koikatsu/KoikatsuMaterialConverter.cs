@@ -275,7 +275,8 @@ namespace StudioEditor.ReferenceModels
             KoikatsuBakedEyeTextures eyeTextures,
             KoikatsuCardFaceAppearance appearance,
             KoikatsuFaceTextures faceTextures,
-            ICollection<Material> runtimeMaterials)
+            ICollection<Material> runtimeMaterials,
+            bool hasBakedSkinColor = false)
         {
             Convert(
                 model,
@@ -284,7 +285,7 @@ namespace StudioEditor.ReferenceModels
                 null,
                 null,
                 skinColor,
-                new SkinTextureOverride(skinTexture, "cf_o_face"),
+                new SkinTextureOverride(skinTexture, "cf_o_face", colorBaked: hasBakedSkinColor),
                 eyeTextures,
                 null,
                 null,
@@ -571,10 +572,13 @@ namespace StudioEditor.ReferenceModels
                             renderer.name,
                             source?.name);
                     var hasBakedClothes = bakedClothesTexture != null;
+                    var hasBakedSkin = skinTexture?.ColorBaked == true &&
+                                       skinTexture.Texture != null &&
+                                       materialKey.Contains(skinTexture.RendererMarker);
                     var usesFinalMaterialEditorAlbedo =
                         UsesFinalMaterialEditorAlbedo(source);
                     var materialColor = hasBakedIris || hasBakedWhite ||
-                                        hasBakedClothes
+                                        hasBakedClothes || hasBakedSkin
                         ? Color.white
                         : SelectColor(
                             renderer.name,
@@ -607,7 +611,7 @@ namespace StudioEditor.ReferenceModels
                         ? characterScheme.CreateMaterial(
                             new CharacterRenderMaterialContext(
                                 source,
-                                characterStyle.Value,
+                                isHairAccessory ? CharacterRenderSurfaceRole.Accessory : characterStyle.Value,
                                 materialKey,
                                 materialName,
                                 materialColor,
@@ -626,15 +630,25 @@ namespace StudioEditor.ReferenceModels
                                     : GetClothesColor(clothes, 2),
                                 GetClothesColor(clothes, 3),
                                 !usesFinalMaterialEditorAlbedo &&
-                                (hair != null ||
+                                (isHairAccessory ||
                                  clothes != null && !hasBakedClothes) &&
                                 HasVertexColors(renderer),
-                                hairGlossTexture))
+                                hairGlossTexture,
+                                colorMaskBlend: !usesFinalMaterialEditorAlbedo && hair != null && !isHairAccessory &&
+                                    source != null && source.shader != null &&
+                                    source.shader.name.StartsWith("Shader Forge/main_hair", StringComparison.Ordinal) &&
+                                    source.HasProperty("_ColorMask") && source.GetTexture("_ColorMask") != null
+                                        ? CharacterColorMaskBlend.Sequential : CharacterColorMaskBlend.None))
                         : CreateFallbackMaterial(
                             source,
                             fallbackShader,
                             materialName,
                             materialColor);
+                    if (source?.shader?.name == "Shader Forge/toon_textureanimation")
+                    {
+                        UnityEngine.Object.Destroy(converted);
+                        converted = KoikatsuSceneMaterialUtility.TryCreate(source, materialName, Color.white);
+                    }
                     if (converted == null)
                     {
                         throw new InvalidOperationException(
@@ -680,6 +694,10 @@ namespace StudioEditor.ReferenceModels
                     }
                     else if (hasBakedIris)
                     {
+                        if (converted.HasProperty("_IrisHighlightMask"))
+                            converted.SetTexture("_IrisHighlightMask", bakedIris.HighlightMask);
+                        if (converted.HasProperty("_IrisHighlightEnabled"))
+                            converted.SetFloat("_IrisHighlightEnabled", bakedIris.HighlightMask != null ? 1f : 0f);
                         MaterialRenderUtility.SetMainTextureTransform(
                             converted,
                             bakedIris.Scale,
@@ -694,6 +712,12 @@ namespace StudioEditor.ReferenceModels
                 }
 
                 renderer.sharedMaterials = convertedMaterials;
+                if (Array.TrueForAll(convertedMaterials, material =>
+                    KoikatsuSceneMaterialUtility.IsEffect(material) || KoikatsuSceneMaterialUtility.IsSky(material)))
+                {
+                    renderer.shadowCastingMode = ShadowCastingMode.Off;
+                    renderer.receiveShadows = false;
+                }
                 if (hasVisibleEyeLayer)
                 {
                     // EyeLookMaterialControll is unavailable on imported assets.
@@ -868,12 +892,15 @@ namespace StudioEditor.ReferenceModels
             string materialName,
             Color baseColor)
         {
+            var sceneMaterial = KoikatsuSceneMaterialUtility.TryCreate(source, materialName, baseColor);
+            if (sceneMaterial != null) return sceneMaterial;
             var material = new Material(shader)
             {
                 name = materialName,
             };
             MaterialRenderUtility.SetBaseColor(material, baseColor);
             MaterialRenderUtility.CopySourceRenderState(source, material);
+            ImportedSurfaceMaterialUtility.CopyToLit(source, material);
             return material;
         }
 
@@ -1090,15 +1117,11 @@ namespace StudioEditor.ReferenceModels
         private static bool ShouldHide(string rendererName)
         {
             return rendererName.StartsWith("cf_O_namida_", StringComparison.Ordinal) ||
-                   rendererName.StartsWith("cf_O_gag_eye_", StringComparison.Ordinal) ||
                    string.Equals(rendererName, "o_shadowcaster", StringComparison.Ordinal) ||
                    string.Equals(rendererName, "o_dankon", StringComparison.Ordinal) ||
                    string.Equals(rendererName, "o_gomu", StringComparison.Ordinal) ||
                    string.Equals(rendererName, "o_mnpa", StringComparison.Ordinal) ||
-                   string.Equals(rendererName, "o_mnpb", StringComparison.Ordinal) ||
-                   string.Equals(rendererName, "cf_O_canine", StringComparison.Ordinal) ||
-                   string.Equals(rendererName, "cf_O_tooth", StringComparison.Ordinal) ||
-                   string.Equals(rendererName, "o_tang", StringComparison.Ordinal);
+                   string.Equals(rendererName, "o_mnpb", StringComparison.Ordinal);
         }
 
         private static Texture GetMainTexture(Material material)
@@ -1106,6 +1129,15 @@ namespace StudioEditor.ReferenceModels
             if (material == null)
             {
                 return null;
+            }
+
+            // Converted URP materials mark _BaseMap as their main texture.
+            // _MainTex is only a compatibility alias and can be empty; reading
+            // it first silently skipped clothing alpha-mask baking.
+            if (material.HasProperty("_BaseMap") &&
+                material.GetTexture("_BaseMap") is Texture baseMap)
+            {
+                return baseMap;
             }
 
             if (material.HasProperty("_MainTex"))
@@ -1318,12 +1350,14 @@ namespace StudioEditor.ReferenceModels
             public SkinTextureOverride(
                 Texture2D texture,
                 string rendererMarker,
-                bool alphaClip = false)
+                bool alphaClip = false,
+                bool colorBaked = false)
             {
                 Texture = texture;
                 RendererMarker = (rendererMarker ?? string.Empty)
                     .ToLowerInvariant();
                 AlphaClip = alphaClip;
+                ColorBaked = colorBaked;
             }
 
             public Texture2D Texture { get; }
@@ -1331,6 +1365,8 @@ namespace StudioEditor.ReferenceModels
             public string RendererMarker { get; }
 
             public bool AlphaClip { get; }
+
+            public bool ColorBaked { get; }
         }
     }
 }

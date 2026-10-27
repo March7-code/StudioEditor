@@ -2,6 +2,33 @@
     flex-grow: 1;
 }
 
+.model-load-progress {
+    position: absolute;
+    left: 72px;
+    bottom: 24px;
+    width: 340px;
+    padding: 14px;
+    background-color: rgba(28, 33, 39, 0.97);
+    border-width: 1px;
+    border-color: rgb(70, 83, 96);
+    border-radius: 6px;
+}
+
+.model-load-progress__stage {
+    color: rgb(235, 240, 245);
+    font-size: 14px;
+    -unity-font-style: bold;
+    margin-bottom: 8px;
+}
+
+.model-load-progress__detail {
+    color: rgb(178, 190, 203);
+    font-size: 12px;
+    white-space: normal;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
 .viewport-input {
     position: absolute;
     top: 48px;
@@ -1741,8 +1768,8 @@
     top: 188px;
     left: 58px;
     width: 190px;
-    height: 81px;
-    min-height: 81px;
+    height: 120px;
+    min-height: 120px;
     padding: 6px;
     color: rgb(222, 226, 230);
     background-color: rgba(28, 31, 34, 0.98);
@@ -1751,7 +1778,7 @@
     border-radius: 4px;
 }
 
-.editor-settings-menu__physics {
+.editor-settings-menu__toggle {
     height: 32px;
     min-height: 32px;
     margin: 0;
@@ -1766,21 +1793,25 @@
     font-size: 11px;
 }
 
-.editor-settings-menu__physics:hover {
+.editor-settings-menu__toggle:hover {
     color: white;
     background-color: rgb(51, 56, 61);
 }
 
-.editor-settings-menu__physics .unity-toggle__label {
+.editor-settings-menu__toggle .unity-toggle__label {
     flex-grow: 1;
 }
 
-.editor-settings-menu__physics .unity-toggle__input {
+.editor-settings-menu__toggle .unity-toggle__input {
     margin-left: 8px;
 }
 
-.editor-settings-menu__physics:disabled {
+.editor-settings-menu__toggle:disabled {
     opacity: 0.4;
+}
+
+.editor-settings-menu__grid {
+    margin-top: 5px;
 }
 
 .editor-settings-menu__item {

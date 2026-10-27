@@ -2,6 +2,13 @@ using UnityEngine;
 
 namespace StudioEditor.Rendering
 {
+    public enum CharacterColorMaskBlend
+    {
+        None,
+        NormalizedWeights,
+        Sequential,
+    }
+
     public enum CharacterRenderSurfaceRole
     {
         Unknown,
@@ -26,7 +33,8 @@ namespace StudioEditor.Rendering
             Color? quaternaryColor = null,
             bool useVertexColorChannels = false,
             Texture hairGlossTexture = null,
-            Texture toonRampTexture = null)
+            Texture toonRampTexture = null,
+            CharacterColorMaskBlend colorMaskBlend = CharacterColorMaskBlend.None)
         {
             SourceMaterial = sourceMaterial;
             Role = role;
@@ -40,6 +48,7 @@ namespace StudioEditor.Rendering
             UseVertexColorChannels = useVertexColorChannels;
             HairGlossTexture = hairGlossTexture;
             ToonRampTexture = toonRampTexture;
+            ColorMaskBlend = colorMaskBlend;
         }
 
         public Material SourceMaterial { get; }
@@ -63,6 +72,9 @@ namespace StudioEditor.Rendering
         public Color? QuaternaryColor { get; }
 
         public bool UseVertexColorChannels { get; }
+
+        // Mask channels and vertex colors are separate source shader semantics.
+        public CharacterColorMaskBlend ColorMaskBlend { get; }
 
         public Texture HairGlossTexture { get; }
 

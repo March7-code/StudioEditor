@@ -1,0 +1,9 @@
+{
+  "name": "StudioEditor.Tests.Editor",
+  "references": ["StudioEditor.Runtime", "StudioEditor.Adapter.Koikatsu", "StudioEditor.Characters", "StudioEditor.Rendering", "StudioEditor.Rendering.URP", "StudioEditor.RenderScheme.DefaultAnime", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["AssetsTools.NET.dll"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

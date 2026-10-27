@@ -97,6 +97,13 @@ Bindings use the strongest available identity: adapter material index, prefab or
 asset identity, relative transform path, renderer index, and material slot. A
 binding that no longer matches is surfaced for repair.
 
+## Scene-Level Experiment
+
+The scene-level URP volume and geometry-shadow experiment is implemented separately
+from character material schemes. Its code switch, pipeline ownership, hardware
+requirements and current limits are documented in
+[ExperimentalAtmosphere/README.md](RenderSchemes/ExperimentalAtmosphere/README.md).
+
 ## Non-Goals
 
 - No universal PBR or anime material schema.

@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using System.IO;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
@@ -10,6 +13,142 @@ namespace StudioEditor.ReferenceModels
 {
     internal static class KoikatsuMorphControllerLoader
     {
+        private static class ParsedCache<T> where T : class
+        {
+            public static readonly ConcurrentDictionary<string, Lazy<T>> Values =
+                new ConcurrentDictionary<string, Lazy<T>>();
+        }
+
+        public static Task PrepareAsync(KoikatsuBundleSource head, string assetName,
+            KoikatsuBundleSource body, CancellationToken token)
+        {
+            StudioEditorDiskCache.Initialize();
+            return Task.Run(() =>
+            {
+                foreach (var field in new[] { "EyebrowCtrl", "MouthCtrl", "EyesCtrl" })
+                {
+                    token.ThrowIfCancellationRequested();
+                    try { ParseFaceMorph(head, assetName, field); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception exception) { Debug.LogWarning("Could not prepare " + field + ": " + exception.Message); }
+                }
+                token.ThrowIfCancellationRequested();
+                try { ParseEyes(body, "p_cf_head_bone"); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception exception) { Debug.LogWarning("Could not prepare eye look: " + exception.Message); }
+            }, token);
+        }
+
+        private static T ReadMetadata<T>(KoikatsuBundleSource source, string identity,
+            Func<T> parse, Func<BinaryReader, T> read, Action<BinaryWriter, T> write) where T : class
+        {
+            var key = "morph-v2|" + DiskCacheStore.SourceFingerprint(source.FilePath) + "|" +
+                source.StreamOffset + "|" + source.ArchiveEntryName + "|" + identity;
+            var lazy = ParsedCache<T>.Values.GetOrAdd(key, _ => new Lazy<T>(() =>
+            {
+                var store = StudioEditorDiskCache.Store;
+                if (store.TryRead("Morphs", key, out var bytes))
+                {
+                    try
+                    {
+                        using (var stream = new MemoryStream(bytes, false))
+                        using (var reader = new BinaryReader(stream))
+                        {
+                            var cached = reader.ReadBoolean() ? read(reader) : null;
+                            if (stream.Position != stream.Length) throw new InvalidDataException("Trailing morph cache data.");
+                            ReferenceModelLoadContext.Current?.RecordCache(true);
+                            return cached;
+                        }
+                    }
+                    catch (IOException) { }
+                    catch (ArgumentException) { }
+                }
+                ReferenceModelLoadContext.Current?.RecordCache(false);
+                ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
+                var value = parse();
+                using (var stream = new MemoryStream())
+                {
+                    using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true))
+                    {
+                        writer.Write(value != null);
+                        if (value != null) write(writer, value);
+                    }
+                    store.Write("Morphs", key, stream.ToArray(),
+                        ReferenceModelLoadContext.Current?.CancellationToken ?? default);
+                }
+                return value;
+            }));
+            try { return lazy.Value; }
+            catch { ParsedCache<T>.Values.TryRemove(key, out _); throw; }
+        }
+
+        private static FaceMorphDefinition ParseFaceMorph(KoikatsuBundleSource source,
+            string assetName, string field)
+        {
+            return ReadMetadata(source, assetName + "|" + field,
+                () => ParseFaceMorphCore(source, assetName, field),
+                reader =>
+                {
+                    var minimum = reader.ReadSingle();
+                    var maximum = reader.ReadSingle();
+                    var correction = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                    var targets = new List<FaceMorphTargetDefinition>();
+                    var count = ReadCacheCount(reader);
+                    for (var index = 0; index < count; index++)
+                    {
+                        var path = reader.ReadString();
+                        var pairs = new List<CharacterMorphPair>();
+                        var pairCount = ReadCacheCount(reader);
+                        for (var pairIndex = 0; pairIndex < pairCount; pairIndex++)
+                            pairs.Add(new CharacterMorphPair(reader.ReadInt32(), reader.ReadInt32()));
+                        targets.Add(new FaceMorphTargetDefinition(path, pairs.AsReadOnly()));
+                    }
+                    return new FaceMorphDefinition(targets.AsReadOnly(), minimum, maximum, correction);
+                },
+                (writer, value) =>
+                {
+                    writer.Write(value.OpenMin);
+                    writer.Write(value.OpenMax);
+                    writer.Write(value.LookCorrection.x); writer.Write(value.LookCorrection.y); writer.Write(value.LookCorrection.z);
+                    writer.Write(value.Targets.Count);
+                    foreach (var target in value.Targets)
+                    {
+                        writer.Write(target.TransformPath);
+                        writer.Write(target.Patterns.Count);
+                        foreach (var pair in target.Patterns)
+                        { writer.Write(pair.ClosedIndex); writer.Write(pair.OpenIndex); }
+                    }
+                });
+        }
+
+        private static EyeLookDefinition ParseEyes(KoikatsuBundleSource source, string assetName)
+        {
+            return ReadMetadata(source, assetName + "|eyes",
+                () => ParseEyesCore(source, assetName),
+                reader => new EyeLookDefinition(reader.ReadString(), reader.ReadString(), reader.ReadString(),
+                    new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                    new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                    new EyeLookSettingsDefinition(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                        reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                        reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle())),
+                (writer, value) =>
+                {
+                    writer.Write(value.ReferenceName); writer.Write(value.LeftEyeName); writer.Write(value.RightEyeName);
+                    foreach (var number in new[] { value.ReferenceForward.x, value.ReferenceForward.y, value.ReferenceForward.z,
+                        value.ReferenceUp.x, value.ReferenceUp.y, value.ReferenceUp.z, value.LeftMinHorizontal, value.LeftMaxHorizontal,
+                        value.RightMinHorizontal, value.RightMaxHorizontal, value.UpAngleLimit, value.DownAngleLimit,
+                        value.BendingThreshold, value.MaxAngleDifference, value.BendingMultiplier, value.Response })
+                        writer.Write(number);
+                });
+        }
+
+        private static int ReadCacheCount(BinaryReader reader)
+        {
+            var count = reader.ReadInt32();
+            if (count < 0 || count > 10000) throw new InvalidDataException("Invalid morph cache count.");
+            return count;
+        }
+
         public static CharacterEyebrowController AttachEyebrow(
             KoikatsuBundleSource source,
             string assetName,
@@ -42,6 +181,7 @@ namespace StudioEditor.ReferenceModels
 
                 var controller =
                     instance.AddComponent<CharacterEyebrowController>();
+                controller.QuantizeOpeningToPercent = true;
                 controller.Configure(
                     targets,
                     null,
@@ -91,6 +231,7 @@ namespace StudioEditor.ReferenceModels
                 }
 
                 var controller = instance.AddComponent<CharacterMouthController>();
+                controller.QuantizeOpeningToPercent = true;
                 controller.Configure(
                     targets,
                     null,
@@ -141,11 +282,13 @@ namespace StudioEditor.ReferenceModels
 
                 var controller =
                     instance.AddComponent<CharacterEyeOpenController>();
+                controller.QuantizeOpeningToPercent = true;
                 controller.Configure(
                     targets,
                     null,
                     definition.OpenMin,
                     Mathf.Min(definition.OpenMax, 0.92f));
+                controller.ConfigureLookCorrection(null, definition.LookCorrection);
                 return controller;
             }
             catch (Exception exception)
@@ -293,6 +436,9 @@ namespace StudioEditor.ReferenceModels
                     definition.BendingMultiplier,
                     definition.Response);
                 controller.ConfigurePupils(pupils);
+                // EyeLookMaterialControll uses EyeLookCalc.GetAngleVRate()
+                // (the left eye's vertical rate) for both iris materials.
+                controller.UseSharedVerticalLookRate = true;
                 return controller;
             }
             catch (Exception exception)
@@ -612,7 +758,7 @@ namespace StudioEditor.ReferenceModels
             return false;
         }
 
-        private static EyeLookDefinition ParseEyes(
+        private static EyeLookDefinition ParseEyesCore(
             KoikatsuBundleSource source,
             string assetName)
         {
@@ -831,7 +977,7 @@ namespace StudioEditor.ReferenceModels
             return field == null || field.IsDummy ? 0f : field.AsFloat;
         }
 
-        private static FaceMorphDefinition ParseFaceMorph(
+        private static FaceMorphDefinition ParseFaceMorphCore(
             KoikatsuBundleSource source,
             string assetName,
             string controllerField)
@@ -931,7 +1077,8 @@ namespace StudioEditor.ReferenceModels
                         return new FaceMorphDefinition(
                             result.AsReadOnly(),
                             ReadFloat(controller["OpenMin"], 0f),
-                            ReadFloat(controller["OpenMax"], 1f));
+                            ReadFloat(controller["OpenMax"], 1f),
+                            new Vector3(ReadFloat(behaviour["EyeLookUpCorrect"]), ReadFloat(behaviour["EyeLookDownCorrect"]), ReadFloat(behaviour["EyeLookSideCorrect"])));
                     }
                 }
 
@@ -1001,14 +1148,17 @@ namespace StudioEditor.ReferenceModels
             public FaceMorphDefinition(
                 IReadOnlyList<FaceMorphTargetDefinition> targets,
                 float openMin,
-                float openMax)
+                float openMax, Vector3 lookCorrection)
             {
                 Targets = targets;
                 OpenMin = openMin;
                 OpenMax = openMax;
+                LookCorrection = lookCorrection;
             }
 
             public IReadOnlyList<FaceMorphTargetDefinition> Targets { get; }
+
+            public Vector3 LookCorrection { get; }
 
             public float OpenMin { get; }
 

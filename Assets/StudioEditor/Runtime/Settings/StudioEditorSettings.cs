@@ -10,6 +10,7 @@ namespace StudioEditor.Settings
         private const string KeyPrefix = "StudioEditor.Settings.";
         private const string KoikatsuRootKey = KeyPrefix + "KoikatsuRoot";
         private const string UiScaleKey = KeyPrefix + "UiScale";
+        private const string ShowGridKey = KeyPrefix + "ShowGrid";
         private const string OrbitButtonKey = KeyPrefix + "OrbitButton";
         private const string PanButtonKey = KeyPrefix + "PanButton";
         private const string KoikatsuConfigResource = "KoikatsuAdapterConfig";
@@ -18,6 +19,7 @@ namespace StudioEditor.Settings
         private static bool hasKoikatsuRootOverride;
         private static string koikatsuGameRoot;
         private static float uiScale;
+        private static bool showGrid;
         private static ViewportPointerButton orbitButton;
         private static ViewportPointerButton panButton;
 
@@ -47,6 +49,15 @@ namespace StudioEditor.Settings
             {
                 EnsureLoaded();
                 return uiScale;
+            }
+        }
+
+        public static bool ShowGrid
+        {
+            get
+            {
+                EnsureLoaded();
+                return showGrid;
             }
         }
 
@@ -132,6 +143,20 @@ namespace StudioEditor.Settings
             Changed?.Invoke();
         }
 
+        public static void SetShowGrid(bool value)
+        {
+            EnsureLoaded();
+            if (showGrid == value)
+            {
+                return;
+            }
+
+            showGrid = value;
+            PlayerPrefs.SetInt(ShowGridKey, value ? 1 : 0);
+            PlayerPrefs.Save();
+            Changed?.Invoke();
+        }
+
         public static void SetOrbitButton(ViewportPointerButton value)
         {
             EnsureLoaded();
@@ -196,6 +221,7 @@ namespace StudioEditor.Settings
             }
 
             loaded = true;
+            showGrid = PlayerPrefs.GetInt(ShowGridKey, 1) != 0;
             hasKoikatsuRootOverride = PlayerPrefs.HasKey(KoikatsuRootKey);
             koikatsuGameRoot = hasKoikatsuRootOverride
                 ? PlayerPrefs.GetString(KoikatsuRootKey, string.Empty)

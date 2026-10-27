@@ -1,0 +1,13 @@
+{
+  "name": "StudioEditor.RenderScheme.ExperimentalAtmosphere",
+  "rootNamespace": "StudioEditor.Rendering.Experimental",
+  "references": [
+    "StudioEditor.Rendering",
+    "StudioEditor.Rendering.URP",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.UnifiedRayTracing.Runtime"
+  ],
+  "autoReferenced": true,
+  "allowUnsafeCode": false
+}

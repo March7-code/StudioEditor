@@ -615,7 +615,12 @@ namespace StudioEditor.ReferenceModels
                     loadedSource,
                     asset.AssetName,
                     instance,
-                    options.PhysicsAllowed);
+                    options.PhysicsAllowed,
+                    options.TargetBones,
+                    options.Parent != null
+                        ? options.Parent.GetComponentInParent<KoikatsuCharacterColliders>(true)?.Colliders ??
+                          options.SharedRootBone?.GetComponentInParent<KoikatsuCharacterColliders>(true)?.Colliders
+                        : null);
 
                 KoikatsuVer02MetadataLoader.Attach(
                     loadedSource,

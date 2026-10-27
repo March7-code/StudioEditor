@@ -98,8 +98,9 @@ namespace StudioEditor.ReferenceModels
                 Math.Max(source.height, 1),
                 0,
                 RenderTextureFormat.ARGB32,
-                RenderTextureReadWrite.Default);
+                RenderTextureReadWrite.sRGB);
             var previous = RenderTexture.active;
+            var previousSrgbWrite = GL.sRGBWrite;
             Texture2D result = null;
             try
             {
@@ -118,6 +119,7 @@ namespace StudioEditor.ReferenceModels
                         useGreenChannel ? 1f : 0f,
                         0f,
                         0f));
+                GL.sRGBWrite = QualitySettings.activeColorSpace == ColorSpace.Linear;
                 Graphics.Blit(source, target, material, 0);
                 RenderTexture.active = target;
                 result = new Texture2D(
@@ -147,6 +149,7 @@ namespace StudioEditor.ReferenceModels
             finally
             {
                 RenderTexture.active = previous;
+                GL.sRGBWrite = previousSrgbWrite;
                 RenderTexture.ReleaseTemporary(target);
                 KoikatsuCharacterAssembler.DestroyRuntimeObject(material);
             }

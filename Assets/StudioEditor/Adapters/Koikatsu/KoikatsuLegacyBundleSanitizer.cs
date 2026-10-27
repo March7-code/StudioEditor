@@ -12,7 +12,7 @@ namespace StudioEditor.ReferenceModels
 {
     internal static class KoikatsuLegacyBundleSanitizer
     {
-        private const string CacheVersion = "texture-zero-mips-lz4-v4";
+        private const string CacheVersion = "bundle-lz4-v5";
 
         private static readonly Dictionary<string, KoikatsuBundleSource>
             preparedSources =
@@ -21,6 +21,15 @@ namespace StudioEditor.ReferenceModels
 
         public static KoikatsuBundleSource Prepare(
             KoikatsuBundleSource source)
+        {
+            lock (preparedSources)
+            {
+                ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
+                return PrepareCore(source);
+            }
+        }
+
+        private static KoikatsuBundleSource PrepareCore(KoikatsuBundleSource source)
         {
             if (source == null)
             {
@@ -35,15 +44,11 @@ namespace StudioEditor.ReferenceModels
                     source.FilePath);
             }
 
-            var fingerprint = string.Join(
-                "|",
-                CacheVersion,
-                source.CacheKey,
-                sourceInfo.Length,
-                sourceInfo.LastWriteTimeUtc.Ticks);
+            var fingerprint = GetFingerprint(source);
             if (preparedSources.TryGetValue(fingerprint, out var prepared))
             {
-                return prepared;
+                if (File.Exists(prepared.FilePath)) return prepared;
+                preparedSources.Remove(fingerprint);
             }
 
             var cacheDirectory = GetCacheDirectory();
@@ -52,29 +57,44 @@ namespace StudioEditor.ReferenceModels
                 cacheDirectory,
                 ComputeHash(fingerprint) + ".unity3d");
             var cleanMarkerPath = cachePath + ".clean";
-            if (File.Exists(cachePath) && new FileInfo(cachePath).Length > 0)
+            if (File.Exists(cachePath) && HasBundleHeader(cachePath))
             {
+                ReferenceModelLoadContext.Current?.RecordCache(true);
                 prepared = new KoikatsuBundleSource(cachePath);
                 preparedSources[fingerprint] = prepared;
                 return prepared;
             }
 
-            if (File.Exists(cleanMarkerPath))
+            DeleteIfExists(cachePath);
+            if (File.Exists(cleanMarkerPath) && File.ReadAllText(cleanMarkerPath) == CacheVersion)
             {
+                ReferenceModelLoadContext.Current?.RecordCache(true);
                 preparedSources[fingerprint] = source;
                 return source;
             }
+            DeleteIfExists(cleanMarkerPath);
 
             var materializedPath = string.Empty;
             var outputPath = cachePath + ".building-" +
                              Guid.NewGuid().ToString("N");
             try
             {
+                ReferenceModelLoadContext.Current?.RecordCache(false);
                 materializedPath = MaterializeSource(
                     source,
                     cacheDirectory);
-                if (!TryWriteSanitizedBundle(materializedPath, outputPath))
+                if (!TryWriteSanitizedBundle(materializedPath, outputPath, source.FilePath))
                 {
+                    // Persist compressed ZIP entries even when no compatibility
+                    // edits were necessary; later imports can use LoadFromFile.
+                    if (!string.IsNullOrEmpty(source.ArchiveEntryName))
+                    {
+                        File.Move(materializedPath, cachePath);
+                        materializedPath = string.Empty;
+                        prepared = new KoikatsuBundleSource(cachePath);
+                        preparedSources[fingerprint] = prepared;
+                        return prepared;
+                    }
                     File.WriteAllText(cleanMarkerPath, CacheVersion);
                     preparedSources[fingerprint] = source;
                     return source;
@@ -93,6 +113,7 @@ namespace StudioEditor.ReferenceModels
                 preparedSources[fingerprint] = prepared;
                 return prepared;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception exception)
             {
                 throw new InvalidDataException(
@@ -111,6 +132,35 @@ namespace StudioEditor.ReferenceModels
                 {
                     DeleteIfExists(materializedPath);
                 }
+            }
+        }
+
+        private static string GetFingerprint(KoikatsuBundleSource source)
+        {
+            return string.Join("|", CacheVersion, DiskCacheStore.SourceFingerprint(source.FilePath),
+                source.StreamOffset, source.ArchiveEntryName, source.FallbackArchiveEntryName);
+        }
+
+        private static bool HasBundleHeader(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            {
+                if (stream.Length < 32) return false;
+                var signature = new byte[8];
+                return stream.Read(signature, 0, signature.Length) == signature.Length &&
+                    Encoding.ASCII.GetString(signature, 0, 7) == "UnityFS" && signature[7] == 0;
+            }
+        }
+
+        public static void Invalidate(KoikatsuBundleSource source)
+        {
+            lock (preparedSources)
+            {
+                var fingerprint = GetFingerprint(source);
+                preparedSources.Remove(fingerprint);
+                var path = Path.Combine(GetCacheDirectory(), ComputeHash(fingerprint) + ".unity3d");
+                DeleteIfExists(path);
+                DeleteIfExists(path + ".clean");
             }
         }
 
@@ -184,22 +234,21 @@ namespace StudioEditor.ReferenceModels
 
         private static bool TryWriteSanitizedBundle(
             string inputPath,
-            string outputPath)
+            string outputPath,
+            string sourcePath)
         {
             var manager = new AssetsManager();
             try
             {
                 var bundle = manager.LoadBundleFile(inputPath);
-                if (!IsLegacyEngineVersion(bundle.file.Header.EngineVersion))
-                {
-                    return false;
-                }
-
+                var legacy = IsLegacyEngineVersion(bundle.file.Header.EngineVersion);
+                var recompress = bundle.originalCompression == AssetBundleCompressionType.LZMA;
                 var changed = false;
                 var directories = bundle.file.BlockAndDirInfo.DirectoryInfos;
                 for (var index = 0; index < directories.Count; index++)
                 {
-                    if (!bundle.file.IsAssetsFile(index))
+                    ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
+                    if (!legacy || !bundle.file.IsAssetsFile(index))
                     {
                         continue;
                     }
@@ -208,18 +257,16 @@ namespace StudioEditor.ReferenceModels
                         bundle,
                         index,
                         false);
-                    var fileChanged = false;
+                    var fileChanged = KoikatsuLegacyTypeTreeRestorer.Restore(assets.file, sourcePath);
                     var textures = assets.file.GetAssetsOfType(
                         AssetClassID.Texture2D);
                     for (var textureIndex = 0;
                          textureIndex < textures.Count;
                          textureIndex++)
                     {
+                        ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
                         var info = textures[textureIndex];
-                        var texture = manager.GetBaseField(
-                            assets,
-                            info,
-                            AssetReadFlags.None);
+                        var texture = ReadTexture(manager, assets, info);
                         if (!TrySanitizeTexture(texture))
                         {
                             if (RequiresMipSanitization(texture))
@@ -245,7 +292,7 @@ namespace StudioEditor.ReferenceModels
                     changed = true;
                 }
 
-                if (!changed)
+                if (!changed && !recompress)
                 {
                     return false;
                 }
@@ -290,7 +337,19 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
-        private static bool TrySanitizeTexture(AssetTypeValueField texture)
+        internal static AssetTypeValueField ReadTexture(
+            AssetsManager manager, AssetsFileInstance assets, AssetFileInfo info)
+        {
+            if (manager.GetTemplateBaseField(assets, info) == null)
+            {
+                throw new InvalidDataException(
+                    $"Texture2D {info.PathId} has no type tree in Unity " +
+                    $"'{assets.file.Metadata.UnityVersion}'.");
+            }
+            return manager.GetBaseField(assets, info, AssetReadFlags.None);
+        }
+
+        internal static bool TrySanitizeTexture(AssetTypeValueField texture)
         {
             var mipCount = texture["m_MipCount"];
             var imageCount = texture["m_ImageCount"];
@@ -516,6 +575,7 @@ namespace StudioEditor.ReferenceModels
             var buffer = new byte[81920];
             while (count > 0)
             {
+                ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
                 var read = input.Read(
                     buffer,
                     0,
@@ -547,21 +607,7 @@ namespace StudioEditor.ReferenceModels
 
         private static string GetCacheDirectory()
         {
-#if UNITY_EDITOR
-            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
-            if (!string.IsNullOrEmpty(projectRoot))
-            {
-                return Path.Combine(
-                    projectRoot,
-                    "Library",
-                    "StudioEditor",
-                    "KoikatsuBundles");
-            }
-#endif
-            return Path.Combine(
-                Application.temporaryCachePath,
-                "StudioEditor",
-                "KoikatsuBundles");
+            return Path.Combine(StudioEditorDiskCache.Store.DirectoryPath, "Bundles");
         }
 
         private static void DeleteIfExists(string path)

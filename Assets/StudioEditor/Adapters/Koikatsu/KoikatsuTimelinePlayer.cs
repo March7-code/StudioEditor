@@ -938,6 +938,11 @@ namespace StudioEditor.ReferenceModels
                     binding.Target.localPosition = value;
                 }
             }
+            else if (binding.Target.GetComponentInParent<KoikatsuStudioScaleCompensation>()
+                         ?.TrySetWorldScale(binding.Target, value) == true)
+            {
+                // Scene object scale keys use Studio's world scale convention.
+            }
             else if (pose != null)
             {
                 pose.SetLocalScale(binding.PoseBoneIndex, value);
@@ -1075,7 +1080,7 @@ namespace StudioEditor.ReferenceModels
                 return false;
             }
 
-            if (pose < 0)
+            if (pose <= 0)
             {
                 controller.ClearPose(hand);
                 return true;

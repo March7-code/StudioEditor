@@ -1,0 +1,13 @@
+{
+  "name": "StudioEditor.RenderScheme.ExperimentalAtmosphere.Tests",
+  "references": [
+    "StudioEditor.RenderScheme.ExperimentalAtmosphere",
+    "StudioEditor.Rendering",
+    "StudioEditor.RenderScheme.DefaultAnime",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

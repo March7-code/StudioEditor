@@ -98,6 +98,7 @@ namespace StudioEditor.ReferenceModels
 
             var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
             var transforms = BuildTransformMap(characterRoot.transform);
+            character.ConfigureJointCorrections(source.ExpressionEnabled);
             ApplyBaseAnimation(
                 character,
                 source,
@@ -146,7 +147,22 @@ namespace StudioEditor.ReferenceModels
                     {
                         var left = ReadQuaternion(reader);
                         var right = ReadQuaternion(reader);
-                        koikatsuEyeLook.SetFixedLocalRotations(left, right);
+                        var leftRate = Vector2.zero;
+                        var rightRate = Vector2.zero;
+                        if (data.Length >= 48)
+                        {
+                            var leftH = reader.ReadSingle();
+                            var rightH = reader.ReadSingle();
+                            var leftV = reader.ReadSingle();
+                            var rightV = reader.ReadSingle();
+                            leftRate = new Vector2(
+                                Mathf.Lerp(-1f, 1f, Mathf.InverseLerp(koikatsuEyeLook.LeftMinHorizontalAngle, koikatsuEyeLook.LeftMaxHorizontalAngle, leftH)),
+                                EyeVerticalRate(koikatsuEyeLook, leftV));
+                            rightRate = new Vector2(
+                                Mathf.Lerp(-1f, 1f, Mathf.InverseLerp(koikatsuEyeLook.RightMinHorizontalAngle, koikatsuEyeLook.RightMaxHorizontalAngle, rightH)),
+                                EyeVerticalRate(koikatsuEyeLook, rightV));
+                        }
+                        koikatsuEyeLook.SetFixedLocalRotations(left, right, leftRate, rightRate);
                     }
                 }
                 catch (Exception exception) when (
@@ -169,6 +185,12 @@ namespace StudioEditor.ReferenceModels
             {
                 eyeLook.SetManualTarget(lookAtTarget);
             }
+        }
+
+        private static float EyeVerticalRate(CharacterEyeLookController look, float angle)
+        {
+            return angle >= 0f ? -Mathf.InverseLerp(0f, look.DownAngleLimit, angle)
+                : Mathf.InverseLerp(0f, -look.UpAngleLimit, angle);
         }
 
         private static Transform RestoreLookAtTarget(
@@ -484,6 +506,15 @@ namespace StudioEditor.ReferenceModels
             }
 
             skeleton = transforms;
+            var skirtBones = new HashSet<string>(catalog.GetStudioBoneNames(13), StringComparer.Ordinal);
+            foreach (var spring in GetComponentsInChildren<KoikatsuSpringBone>(true))
+            {
+                var owner = spring.gameObject.name;
+                if (owner.StartsWith("ct_hair", StringComparison.Ordinal)) spring.FkGroupIndex = 0;
+                else if ((owner == "ct_clothesTop" || owner == "ct_clothesBot" ||
+                          owner.StartsWith("ct_top_parts_", StringComparison.Ordinal)) && spring.ContainsBoneName(skirtBones))
+                    spring.FkGroupIndex = 6;
+            }
             fkOverrides = BuildFkOverrides(
                 source,
                 catalog,
@@ -946,11 +977,19 @@ namespace StudioEditor.ReferenceModels
                 source.RightHandPattern);
         }
 
-        private static void ApplyHandPose(
+        internal static void ApplyHandPose(
             ICharacterHandPoseController controller,
             CharacterHand hand,
             int pattern)
         {
+            // Studio hand pattern 0 has no Animator entry: keep the fingers
+            // from the body animation instead of applying shape-table key 0.
+            if (pattern == 0)
+            {
+                controller.ClearPose(hand);
+                return;
+            }
+
             if (pattern >= 0 && pattern < controller.GetPoseCount(hand))
             {
                 controller.SetPose(hand, pattern);
@@ -1323,6 +1362,9 @@ namespace StudioEditor.ReferenceModels
 
         private void UpdateFkPhysicsState()
         {
+            var fkEnabled = (activeKinematicModes & CharacterKinematicModes.ForwardKinematics) != 0;
+            foreach (var spring in GetComponentsInChildren<KoikatsuSpringBone>(true))
+                spring.SetFkAllowed(spring.FkGroupIndex < 0 || !fkEnabled || !IsActive(activeFk, spring.FkGroupIndex));
             KoikatsuPhysicsRuntime.SetBustAllowed(
                 gameObject,
                 (activeKinematicModes &

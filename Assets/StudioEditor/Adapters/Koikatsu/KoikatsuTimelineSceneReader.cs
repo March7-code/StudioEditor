@@ -65,7 +65,7 @@ namespace StudioEditor.ReferenceModels
                     path);
             }
 
-            var fileData = File.ReadAllBytes(path);
+            var fileData = ReferenceModelLoadContext.Current?.ReadSourceBytes(path) ?? File.ReadAllBytes(path);
             if (!TryReadExtendedPayload(fileData, out var payload))
             {
                 value = null;

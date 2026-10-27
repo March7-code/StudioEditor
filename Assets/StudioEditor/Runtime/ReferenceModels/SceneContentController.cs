@@ -338,6 +338,40 @@ namespace StudioEditor.ReferenceModels
 
         public event Action StateChanged;
 
+        public event Action LoadProgressChanged;
+
+        public ReferenceModelLoadProgress LoadProgress { get; private set; }
+
+        public void CancelLoad() => activeLoad?.Cancel();
+
+        private IProgress<ReferenceModelLoadProgress> BeginLoadProgress(int version)
+        {
+            LoadProgress = new ReferenceModelLoadProgress(0f, "Preparing", string.Empty, 0d, 0, 0);
+            LoadProgressChanged?.Invoke();
+            return new LoadProgressReporter(value =>
+            {
+                if (this == null || version != loadVersion ||
+                    Status != ReferenceModelImportStatus.Loading) return;
+                LoadProgress = value;
+                LoadProgressChanged?.Invoke();
+            });
+        }
+
+        private sealed class LoadProgressReporter : IProgress<ReferenceModelLoadProgress>
+        {
+            private readonly SynchronizationContext context = SynchronizationContext.Current;
+            private readonly int threadId = Thread.CurrentThread.ManagedThreadId;
+            private readonly Action<ReferenceModelLoadProgress> report;
+
+            public LoadProgressReporter(Action<ReferenceModelLoadProgress> report) => this.report = report;
+
+            public void Report(ReferenceModelLoadProgress value)
+            {
+                if (Thread.CurrentThread.ManagedThreadId == threadId) report(value);
+                else context.Post(_ => report(value), null);
+            }
+        }
+
         public ReferenceModelImportStatus Status { get; private set; } =
             ReferenceModelImportStatus.Idle;
 
@@ -465,10 +499,12 @@ namespace StudioEditor.ReferenceModels
             activeLoad = cancellation;
             var version = ++loadVersion;
             SetState(ReferenceModelImportStatus.Loading);
+            var progress = BeginLoadProgress(version);
 
             try
             {
-                var instance = await import(cancellation.Token);
+                var instance = await ReferenceModelLoadPipeline.RunAsync(
+                    filePath, import, cancellation.Token, progress);
 
                 if (instance == null)
                 {
@@ -479,6 +515,10 @@ namespace StudioEditor.ReferenceModels
                 if (version != loadVersion || cancellation.IsCancellationRequested)
                 {
                     instance.Dispose();
+                    if (version == loadVersion)
+                        SetState(managedImports.Count == 0
+                            ? ReferenceModelImportStatus.Idle
+                            : ReferenceModelImportStatus.Ready);
                     return false;
                 }
 
@@ -564,14 +604,16 @@ namespace StudioEditor.ReferenceModels
             activeLoad = cancellation;
             var version = ++loadVersion;
             SetState(ReferenceModelImportStatus.Loading);
+            var progress = BeginLoadProgress(version);
             IReferenceModelInstance replacement = null;
             try
             {
                 var parent = character.Root.transform.parent ?? transform;
-                replacement = await adapter.ImportAsync(
+                replacement = await ReferenceModelLoadPipeline.RunAsync(
                     filePath,
-                    parent,
-                    cancellation.Token);
+                    token => adapter.ImportAsync(filePath, parent, token),
+                    cancellation.Token,
+                    progress);
                 if (replacement == null)
                 {
                     throw new InvalidOperationException(
@@ -583,6 +625,10 @@ namespace StudioEditor.ReferenceModels
                 {
                     replacement.Dispose();
                     replacement = null;
+                    if (version == loadVersion)
+                        SetState(managedImports.Count == 0
+                            ? ReferenceModelImportStatus.Idle
+                            : ReferenceModelImportStatus.Ready);
                     return false;
                 }
 
@@ -880,6 +926,7 @@ namespace StudioEditor.ReferenceModels
             characterModels.Clear();
             sceneHierarchy = null;
             StateChanged = null;
+            LoadProgressChanged = null;
         }
     }
 }

@@ -39,7 +39,7 @@ namespace StudioEditor.ReferenceModels
                     path);
             }
 
-            var bytes = File.ReadAllBytes(path);
+            var bytes = ReferenceModelLoadContext.Current?.ReadSourceBytes(path) ?? File.ReadAllBytes(path);
             var mapModGuid = ReadSideloaderMapGuid(bytes);
             var materialEditorTextures =
                 ReadMaterialEditorSharedTextures(bytes);
@@ -73,7 +73,9 @@ namespace StudioEditor.ReferenceModels
                         reader,
                         version,
                         mapModGuid,
-                        out var map);
+                        out var map,
+                        out var renderSettings);
+                    ReadSecondaryColorGrading(bytes, renderSettings);
                     var storedCameraSlots = new List<KoikatsuSceneCamera>(
                         StoredCameraSlotCount);
                     for (var index = 0;
@@ -83,6 +85,9 @@ namespace StudioEditor.ReferenceModels
                         storedCameraSlots.Add(ReadCameraData(reader, index + 1));
                     }
 
+                    renderSettings.CharacterLight = ReadEnvironmentLight(reader, false);
+                    renderSettings.MapLight = ReadEnvironmentLight(reader, true);
+
                     return new KoikatsuScene(
                         path,
                         version,
@@ -91,7 +96,8 @@ namespace StudioEditor.ReferenceModels
                         camera,
                         GetSavedCameraSlots(storedCameraSlots),
                         ReadSideloaderResolutions(bytes),
-                        ReadSideloaderPatternResolutions(bytes));
+                        ReadSideloaderPatternResolutions(bytes),
+                        renderSettings);
                 }
             }
             catch (EndOfStreamException exception)
@@ -444,7 +450,8 @@ namespace StudioEditor.ReferenceModels
             BinaryReader reader,
             Version version,
             string mapModGuid,
-            out KoikatsuSceneMap map)
+            out KoikatsuSceneMap map,
+            out KoikatsuSceneRenderSettings renderSettings)
         {
             map = new KoikatsuSceneMap(
                 reader.ReadInt32(),
@@ -452,13 +459,16 @@ namespace StudioEditor.ReferenceModels
                 ReadVector3(reader),
                 ReadVector3(reader),
                 mapModGuid);
-            reader.ReadInt32();
-            reader.ReadBoolean();
-            reader.ReadInt32();
+            renderSettings = new KoikatsuSceneRenderSettings
+            {
+                SunLightType = reader.ReadInt32(),
+                MapOption = reader.ReadBoolean(),
+                ColorGradingId = reader.ReadInt32(),
+            };
 
             if (version >= new Version(0, 0, 2))
             {
-                reader.ReadSingle();
+                renderSettings.ColorGradingBlend = reader.ReadSingle();
             }
             else
             {
@@ -524,18 +534,29 @@ namespace StudioEditor.ReferenceModels
             {
                 reader.ReadBoolean();
                 reader.ReadBoolean();
-                reader.ReadSingle();
-                reader.ReadString();
+                renderSettings.CharacterLineDepth = reader.ReadSingle();
+                renderSettings.CharacterAmbientShadow = ReadColor(reader.ReadString());
             }
 
             if (version >= new Version(0, 0, 5))
             {
-                reader.ReadSingle();
-                reader.ReadInt32();
-                reader.ReadSingle();
+                renderSettings.CharacterLineWidth = reader.ReadSingle();
+                renderSettings.CharacterRampId = reader.ReadInt32();
+                renderSettings.CharacterAmbientShadowStrength = reader.ReadSingle();
+                renderSettings.HasCharacterShading = true;
             }
 
             return ReadCameraData(reader);
+        }
+
+        private static StudioEditor.Rendering.ImportedSceneLight ReadEnvironmentLight(BinaryReader reader, bool map)
+        {
+            var color = ReadColor(reader.ReadString());
+            var intensity = reader.ReadSingle();
+            var rotation = new Vector3(reader.ReadSingle(), reader.ReadSingle(), 0f);
+            var shadows = reader.ReadBoolean();
+            var type = map ? (LightType)reader.ReadInt32() : LightType.Directional;
+            return new StudioEditor.Rendering.ImportedSceneLight(color, intensity, rotation, shadows, type);
         }
 
         private static KoikatsuSceneCamera ReadCameraData(
@@ -786,6 +807,31 @@ namespace StudioEditor.ReferenceModels
                 {
                     return;
                 }
+            }
+        }
+
+        private static void ReadSecondaryColorGrading(byte[] fileData, KoikatsuSceneRenderSettings settings)
+        {
+            // Studio's level1 initializes LutBlendTexture to filter 0 (Lut_Amount,
+            // labelled morning), even when the card predates the TwoLut plugin.
+            if (!TryReadExtendedPayload(fileData, out var payload)) return;
+            try
+            {
+                var plugins = MessagePackSerializer.Deserialize<Dictionary<string, KoikatsuCardReader.PluginDataDto>>(payload);
+                if (plugins == null || !plugins.TryGetValue("TwoLutPlugin", out var plugin) ||
+                    plugin?.Data == null || !plugin.Data.TryGetValue("slot", out var raw)) return;
+                if (raw is byte || raw is short || raw is int || raw is long || raw is ushort || raw is uint)
+                {
+                    int slot = Convert.ToInt32(raw);
+                    if (slot < 0) return;
+                    settings.ColorGradingSecondaryId = slot;
+                    if (plugin.Data.TryGetValue("guid", out var guid) && guid is string text)
+                        settings.ColorGradingSecondaryGuid = text;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("Could not read Koikatsu Studio secondary color grading: " + exception.Message);
             }
         }
 
@@ -1099,7 +1145,8 @@ namespace StudioEditor.ReferenceModels
             KoikatsuSceneCamera camera,
             IReadOnlyList<KoikatsuSceneCamera> cameraSlots,
             IReadOnlyList<KoikatsuStudioResolution> resolutions,
-            IReadOnlyList<KoikatsuStudioPatternResolution> patternResolutions)
+            IReadOnlyList<KoikatsuStudioPatternResolution> patternResolutions,
+            KoikatsuSceneRenderSettings renderSettings = null)
         {
             SourcePath = sourcePath;
             Version = version;
@@ -1109,7 +1156,10 @@ namespace StudioEditor.ReferenceModels
             CameraSlots = cameraSlots ?? Array.Empty<KoikatsuSceneCamera>();
             SideloaderResolutions = resolutions;
             SideloaderPatternResolutions = patternResolutions;
+            RenderSettings = renderSettings;
         }
+
+        public KoikatsuSceneRenderSettings RenderSettings { get; }
 
         public string SourcePath { get; }
 
@@ -1686,5 +1736,26 @@ namespace StudioEditor.ReferenceModels
         [Key("Slot")] public int Slot { get; set; }
         [Key("LocalSlot")] public int LocalSlot { get; set; }
         [Key("Name")] public string Name { get; set; }
+    }
+}
+
+namespace StudioEditor.ReferenceModels
+{
+    public sealed class KoikatsuSceneRenderSettings
+    {
+        public bool HasCharacterShading { get; internal set; }
+        public int CharacterRampId { get; internal set; }
+        public Color CharacterAmbientShadow { get; internal set; }
+        public float CharacterAmbientShadowStrength { get; internal set; }
+        public float CharacterLineDepth { get; internal set; } = 0.5f;
+        public float CharacterLineWidth { get; internal set; } = 0.5f;
+        public int SunLightType { get; internal set; }
+        public bool MapOption { get; internal set; }
+        public int ColorGradingId { get; internal set; }
+        public float ColorGradingBlend { get; internal set; }
+        public int ColorGradingSecondaryId { get; internal set; }
+        public string ColorGradingSecondaryGuid { get; internal set; }
+        public StudioEditor.Rendering.ImportedSceneLight CharacterLight { get; internal set; }
+        public StudioEditor.Rendering.ImportedSceneLight MapLight { get; internal set; }
     }
 }

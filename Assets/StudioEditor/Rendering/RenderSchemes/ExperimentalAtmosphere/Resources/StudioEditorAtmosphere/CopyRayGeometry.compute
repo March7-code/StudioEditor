@@ -1,0 +1,62 @@
+#pragma kernel CopyTriangles
+
+ByteAddressBuffer _Positions, _Uvs, _LightmapUvs, _Indices;
+struct Triangle { float4 a, b, c, uvAB, uvC, lightmapAB, lightmapC; };
+RWStructuredBuffer<Triangle> _Triangles;
+float4 _PositionLayout, _UvLayout, _LightmapUvLayout, _TriangleRange;
+int _Index16;
+
+uint LoadIndex(uint index)
+{
+    if (_Index16 == 0) return _Indices.Load(index * 4);
+    uint packed = _Indices.Load((index / 2) * 4);
+    return (packed >> ((index & 1) * 16)) & 65535;
+}
+float3 LoadPosition(uint vertex)
+{
+    return asfloat(_Positions.Load3(vertex * (uint)_PositionLayout.x + (uint)_PositionLayout.y));
+}
+float2 LoadUv(uint vertex)
+{
+    if (_UvLayout.y < 0) return 0;
+    uint address = vertex * (uint)_UvLayout.x + (uint)_UvLayout.y;
+    if (_UvLayout.z > 0)
+    {
+        uint u = (_Uvs.Load(address & ~3u) >> ((address & 3u) * 8)) & 65535;
+        uint next = address + 2;
+        uint v = (_Uvs.Load(next & ~3u) >> ((next & 3u) * 8)) & 65535;
+        return float2(f16tof32(u), f16tof32(v));
+    }
+    return asfloat(_Uvs.Load2(address));
+}
+float2 LoadLightmapUv(uint vertex)
+{
+    if (_LightmapUvLayout.y < 0) return 0;
+    uint address = vertex * (uint)_LightmapUvLayout.x + (uint)_LightmapUvLayout.y;
+    if (_LightmapUvLayout.z > 0)
+    {
+        uint u = (_LightmapUvs.Load(address & ~3u) >> ((address & 3u) * 8)) & 65535;
+        uint next = address + 2;
+        uint v = (_LightmapUvs.Load(next & ~3u) >> ((next & 3u) * 8)) & 65535;
+        return float2(f16tof32(u), f16tof32(v));
+    }
+    return asfloat(_LightmapUvs.Load2(address));
+}
+[numthreads(64, 1, 1)]
+void CopyTriangles(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_TriangleRange.y) return;
+    uint index = (uint)_TriangleRange.z + id.x * 3;
+    uint a = LoadIndex(index) + (uint)_TriangleRange.w;
+    uint b = LoadIndex(index + 1) + (uint)_TriangleRange.w;
+    uint c = LoadIndex(index + 2) + (uint)_TriangleRange.w;
+    Triangle geometryTriangle;
+    geometryTriangle.a = float4(LoadPosition(a), 1);
+    geometryTriangle.b = float4(LoadPosition(b), 1);
+    geometryTriangle.c = float4(LoadPosition(c), 1);
+    geometryTriangle.uvAB = float4(LoadUv(a), LoadUv(b));
+    geometryTriangle.uvC = float4(LoadUv(c), 0, 0);
+    geometryTriangle.lightmapAB = float4(LoadLightmapUv(a), LoadLightmapUv(b));
+    geometryTriangle.lightmapC = float4(LoadLightmapUv(c), 0, 0);
+    _Triangles[(uint)_TriangleRange.x + id.x] = geometryTriangle;
+}

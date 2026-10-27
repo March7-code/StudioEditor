@@ -213,6 +213,7 @@ namespace StudioEditor.UI
                 animationPanel.SetSelectedSceneNode));
             workspaceTools.BringToFront();
             addMenu.BringToFront();
+            root.Add(new ModelLoadProgressPanel(controller));
             uiRoot.Focus();
         }
 

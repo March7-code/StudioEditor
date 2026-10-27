@@ -515,7 +515,8 @@ namespace StudioEditor.ReferenceModels
                     result.Add(renderer);
                 }
                 else if (renderer is MeshRenderer &&
-                         renderer.GetComponent<MeshFilter>()?.sharedMesh != null)
+                         renderer.TryGetComponent<MeshFilter>(out var filter) &&
+                         filter != null && filter.sharedMesh != null)
                 {
                     result.Add(renderer);
                 }

@@ -1,0 +1,24 @@
+#include "Packages/com.unity.render-pipelines.core/Runtime/UnifiedRayTracing/TraceRayAndQueryHit.hlsl"
+#include "FogVolumeCommon.hlsl"
+
+UNIFIED_RT_DECLARE_ACCEL_STRUCT(_FogScene);
+RWTexture3D<float> _FogVisibilityOutput;
+float4 _FogSunDirection;
+float _FogRayDistance;
+
+void RayGenExecute(UnifiedRT::DispatchInfo info)
+{
+    uint3 id = info.dispatchThreadID;
+    if (any(id >= (uint3)_FogGrid.xyz)) return;
+    float2 uv = (id.xy + 0.5) / _FogGrid.xy;
+    float3 a = FogWorldPosition(uv, FogEyeDepth(id.z));
+    float3 b = FogWorldPosition(uv, FogEyeDepth(id.z + 1));
+    UnifiedRT::Ray ray;
+    ray.origin = (a + b) * 0.5;
+    ray.direction = _FogSunDirection.xyz;
+    ray.tMin = 0.01;
+    ray.tMax = _FogRayDistance;
+    bool blocked = UnifiedRT::TraceRayAnyHit(info, UNIFIED_RT_GET_ACCEL_STRUCT(_FogScene),
+        1, ray, UnifiedRT::kRayFlagNone);
+    _FogVisibilityOutput[id] = blocked ? 0.0 : 1.0;
+}

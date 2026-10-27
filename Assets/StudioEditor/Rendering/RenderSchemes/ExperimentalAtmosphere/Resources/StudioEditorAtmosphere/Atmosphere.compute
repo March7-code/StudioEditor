@@ -1,0 +1,66 @@
+#pragma kernel Inject
+#pragma kernel Integrate
+#pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+#pragma multi_compile _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+#include "FogVolumeCommon.hlsl"
+
+RWTexture3D<float4> _FogLightingOutput;
+Texture3D<float4> _FogLighting;
+RWTexture3D<float4> _FogIntegralOutput;
+Texture3D<float> _FogVisibility;
+float4 _FogAlbedo;
+float4 _FogAmbient;
+float4 _FogSunColor;
+float4 _FogSunDirection;
+float _FogAnisotropy;
+float _FogUseRayTracing;
+float _FogUseMainShadow;
+
+float Phase(float cosine)
+{
+    float g = _FogAnisotropy;
+    float d = max(0.001, 1.0 + g * g - 2.0 * g * cosine);
+    return (1.0 - g * g) / (12.5663706 * d * sqrt(d));
+}
+
+[numthreads(4, 4, 4)]
+void Inject(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_FogGrid.xyz)) return;
+    float2 uv = (id.xy + 0.5) / _FogGrid.xy;
+    float3 a = FogWorldPosition(uv, FogEyeDepth(id.z));
+    float3 b = FogWorldPosition(uv, FogEyeDepth(id.z + 1));
+    float3 positionWS = (a + b) * 0.5;
+    float3 viewRay = normalize(b - a);
+    float visibility = _FogUseRayTracing > 0.5 ? _FogVisibility.Load(int4(id, 0)) :
+        (_FogUseMainShadow > 0.5 ? MainLightRealtimeShadow(TransformWorldToShadowCoord(positionWS)) : 1.0);
+    float density = FogDensity(positionWS);
+    float3 incoming = _FogAmbient.rgb + _FogSunColor.rgb * visibility *
+        Phase(dot(viewRay, _FogSunDirection.xyz));
+    _FogLightingOutput[id] = float4(density * _FogAlbedo.rgb * incoming, density);
+}
+
+[numthreads(8, 8, 1)]
+void Integrate(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_FogGrid.xy)) return;
+    float2 uv = (id.xy + 0.5) / _FogGrid.xy;
+    float3 accumulated = 0.0;
+    float transmittance = 1.0;
+    float3 previous = FogWorldPosition(uv, _FogGrid.w);
+    for (uint z = 0; z < (uint)_FogGrid.z; z++)
+    {
+        float3 next = FogWorldPosition(uv, FogEyeDepth(z + 1));
+        float distance = length(next - previous);
+        float4 medium = _FogLighting.Load(int4(id.xy, z, 0));
+        float stepTransmittance = exp(-medium.a * distance);
+        float weight = medium.a > 0.00001 ? (1.0 - stepTransmittance) / medium.a : distance;
+        accumulated += transmittance * medium.rgb * weight;
+        transmittance *= stepTransmittance;
+        _FogIntegralOutput[uint3(id.xy, z)] = float4(accumulated, transmittance);
+        previous = next;
+    }
+}

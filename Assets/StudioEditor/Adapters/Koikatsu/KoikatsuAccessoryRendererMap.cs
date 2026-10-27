@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.Serialization;
 using UnityEngine;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
@@ -14,6 +15,8 @@ namespace StudioEditor.ReferenceModels
         Alpha,
         Hair,
     }
+
+    [DataContract]
 
     internal sealed class KoikatsuAccessoryRendererInfo
     {
@@ -29,11 +32,19 @@ namespace StudioEditor.ReferenceModels
             UseColor03 = useColor03;
         }
 
+        [field: DataMember(Name = "Role")]
+
         public KoikatsuAccessoryRendererRole Role { get; }
+
+        [field: DataMember(Name = "UseColor01")]
 
         public bool UseColor01 { get; }
 
+        [field: DataMember(Name = "UseColor02")]
+
         public bool UseColor02 { get; }
+
+        [field: DataMember(Name = "UseColor03")]
 
         public bool UseColor03 { get; }
     }
@@ -78,16 +89,7 @@ namespace StudioEditor.ReferenceModels
                 return null;
             }
 
-            var cacheKey = CreateCacheKey(source, assetName);
-            Metadata metadata;
-            lock (CacheLock)
-            {
-                if (!Cache.TryGetValue(cacheKey, out metadata))
-                {
-                    metadata = ParseSafely(source, assetName);
-                    Cache.Add(cacheKey, metadata);
-                }
-            }
+            var metadata = GetMetadata(source, assetName);
 
             if (metadata == null)
             {
@@ -132,6 +134,23 @@ namespace StudioEditor.ReferenceModels
             return new KoikatsuAccessoryRendererMap(assignments);
         }
 
+        internal static void Prepare(KoikatsuBundleSource source, string assetName) => GetMetadata(source, assetName);
+
+        private static Metadata GetMetadata(KoikatsuBundleSource source, string assetName)
+        {
+            var key = CreateCacheKey(source, assetName);
+            lock (CacheLock)
+            {
+                if (!Cache.TryGetValue(key, out var metadata))
+                {
+                    metadata = KoikatsuParsedMetadataCache.Read(source, "accessory|" + assetName,
+                        () => ParseSafely(source, assetName));
+                    Cache.Add(key, metadata);
+                }
+                return metadata;
+            }
+        }
+
         private static string CreateCacheKey(
             KoikatsuBundleSource source,
             string assetName)
@@ -158,6 +177,7 @@ namespace StudioEditor.ReferenceModels
 
                 return metadata;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception exception)
             {
                 Debug.LogWarning(
@@ -294,8 +314,11 @@ namespace StudioEditor.ReferenceModels
             return field != null && !field.IsDummy && field.AsBool;
         }
 
+        [DataContract]
+
         private sealed class Metadata
         {
+            [field: DataMember(Name = "Roles")]
             public Dictionary<string, KoikatsuAccessoryRendererInfo> Roles {
                 get;
             } = new Dictionary<string, KoikatsuAccessoryRendererInfo>(

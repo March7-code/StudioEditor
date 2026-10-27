@@ -17,6 +17,7 @@ namespace StudioEditor.UI
         private readonly Button launcher;
         private readonly VisualElement menu;
         private readonly Toggle physicsToggle;
+        private readonly Toggle gridToggle;
         private readonly Button editorSettingsButton;
         private readonly VisualElement editorSurface;
         private readonly TextField koikatsuDirectoryField;
@@ -27,7 +28,7 @@ namespace StudioEditor.UI
 
         private bool isOpen;
         private bool editorSettingsOpen;
-        private bool physicsEnabled;
+        private bool physicsEnabled = true;
         private bool refreshingEditorSettings;
 
         public EditorSettingsPanel(
@@ -66,8 +67,19 @@ namespace StudioEditor.UI
                 tooltip = "Enable physics for supported scene objects",
             };
             physicsToggle.AddToClassList("editor-settings-menu__physics");
+            physicsToggle.AddToClassList("editor-settings-menu__toggle");
             physicsToggle.RegisterValueChangedCallback(HandlePhysicsChanged);
             menu.Add(physicsToggle);
+
+            gridToggle = new Toggle("Show Grid")
+            {
+                name = "editor-settings-show-grid",
+                tooltip = "Show ground grid lines and ground axes",
+            };
+            gridToggle.AddToClassList("editor-settings-menu__toggle");
+            gridToggle.AddToClassList("editor-settings-menu__grid");
+            gridToggle.RegisterValueChangedCallback(HandleGridChanged);
+            menu.Add(gridToggle);
 
             editorSettingsButton = new Button(() => SetEditorSettingsOpen(true))
             {
@@ -237,6 +249,14 @@ namespace StudioEditor.UI
             RefreshPhysics();
         }
 
+        private void HandleGridChanged(ChangeEvent<bool> changeEvent)
+        {
+            if (!refreshingEditorSettings)
+            {
+                StudioEditorSettings.SetShowGrid(changeEvent.newValue);
+            }
+        }
+
         private void HandleKoikatsuDirectoryChanged(
             ChangeEvent<string> changeEvent)
         {
@@ -323,6 +343,7 @@ namespace StudioEditor.UI
                 var directory = StudioEditorSettings.KoikatsuGameRoot;
                 koikatsuDirectoryField.SetValueWithoutNotify(directory);
                 uiScaleSlider.SetValueWithoutNotify(StudioEditorSettings.UiScale);
+                gridToggle.SetValueWithoutNotify(StudioEditorSettings.ShowGrid);
                 orbitButtonField.SetValueWithoutNotify(
                     GetPointerButtonName(StudioEditorSettings.OrbitButton));
                 panButtonField.SetValueWithoutNotify(

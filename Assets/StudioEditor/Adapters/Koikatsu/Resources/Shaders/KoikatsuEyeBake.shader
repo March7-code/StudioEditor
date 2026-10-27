@@ -173,5 +173,30 @@ Shader "Hidden/StudioEditor/KoikatsuEyeBake"
             }
             ENDHLSL
         }
+        // Alpha is coverage: keep it linear when storing in an sRGB texture.
+        Pass
+        {
+            HLSLPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment fragHighlightMask
+            #include "UnityCG.cginc"
+            sampler2D _MainTex, _HighlightUp, _HighlightDown;
+            float4 _HighlightUpColor, _HighlightDownColor;
+            float _HighlightUpOffsetY, _HighlightDownOffsetY;
+            float _HasHighlightUp, _HasHighlightDown, _Rotation;
+            float4 fragHighlightMask(v2f_img input) : SV_Target
+            {
+                float sine, cosine;
+                sincos(_Rotation, sine, cosine);
+                float2 delta = input.uv - .5;
+                float2 uv = float2(cosine*delta.x-sine*delta.y, sine*delta.x+cosine*delta.y)+.5;
+                float4 upper = tex2D(_HighlightUp, uv+float2(0,_HighlightUpOffsetY)).a * _HighlightUpColor * _HasHighlightUp;
+                float4 lower = tex2D(_HighlightDown, uv+float2(0,_HighlightDownOffsetY)).a * _HighlightDownColor * _HasHighlightDown;
+                // The source combines the two colored alpha masks by max,
+                // not two successive lerps or multiplication by texture RGB.
+                return max(upper,lower);
+            }
+            ENDHLSL
+        }
     }
 }

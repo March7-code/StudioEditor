@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.Serialization;
 using System.IO.Compression;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
@@ -132,16 +133,7 @@ namespace StudioEditor.ReferenceModels
                 return null;
             }
 
-            var cacheKey = CreateCacheKey(source, assetName);
-            Metadata metadata;
-            lock (CacheLock)
-            {
-                if (!Cache.TryGetValue(cacheKey, out metadata))
-                {
-                    metadata = ParseSafely(source, assetName);
-                    Cache.Add(cacheKey, metadata);
-                }
-            }
+            var metadata = GetMetadata(source, assetName);
 
             if (metadata == null)
             {
@@ -206,6 +198,23 @@ namespace StudioEditor.ReferenceModels
                 emblem02.AsReadOnly());
         }
 
+        internal static void Prepare(KoikatsuBundleSource source, string assetName) => GetMetadata(source, assetName);
+
+        private static Metadata GetMetadata(KoikatsuBundleSource source, string assetName)
+        {
+            var key = CreateCacheKey(source, assetName);
+            lock (CacheLock)
+            {
+                if (!Cache.TryGetValue(key, out var metadata))
+                {
+                    metadata = KoikatsuParsedMetadataCache.Read(source, "clothes|" + assetName,
+                        () => ParseSafely(source, assetName));
+                    Cache.Add(key, metadata);
+                }
+                return metadata;
+            }
+        }
+
         private static string CreateCacheKey(
             KoikatsuBundleSource source,
             string assetName)
@@ -232,6 +241,7 @@ namespace StudioEditor.ReferenceModels
 
                 return metadata;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception exception)
             {
                 Debug.LogWarning(
@@ -371,6 +381,9 @@ namespace StudioEditor.ReferenceModels
             KoikatsuBundleSource source,
             out Stream ownedStream)
         {
+            // Metadata parsers share the prepared disk copy with Unity loading;
+            // compressed zipmods and LZMA sources are not expanded again here.
+            source = KoikatsuLegacyBundleSanitizer.Prepare(source);
             ownedStream = null;
             if (source.StreamOffset > 0)
             {
@@ -925,23 +938,33 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
+        [DataContract]
+
         private sealed class Metadata
         {
+            [field: DataMember(Name = "Slots")]
             public Dictionary<string, KoikatsuClothesTextureSlot> Slots { get; } =
                 new Dictionary<string, KoikatsuClothesTextureSlot>(
                     StringComparer.Ordinal);
+            [field: DataMember(Name = "Option01")]
             public HashSet<string> Option01 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
+            [field: DataMember(Name = "Option02")]
             public HashSet<string> Option02 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
+            [field: DataMember(Name = "Sleeves01")]
             public HashSet<string> Sleeves01 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
+            [field: DataMember(Name = "Sleeves02")]
             public HashSet<string> Sleeves02 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
+            [field: DataMember(Name = "Sleeves03")]
             public HashSet<string> Sleeves03 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
+            [field: DataMember(Name = "Emblem01")]
             public HashSet<string> Emblem01 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
+            [field: DataMember(Name = "Emblem02")]
             public HashSet<string> Emblem02 { get; } =
                 new HashSet<string>(StringComparer.Ordinal);
         }

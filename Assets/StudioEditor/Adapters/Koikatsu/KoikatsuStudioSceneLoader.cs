@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using StudioEditor.Characters;
+using StudioEditor.Rendering;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -30,11 +31,9 @@ namespace StudioEditor.ReferenceModels
                 // Leave the UI event dispatch stack before synchronous prefab work.
                 await Task.Yield();
                 cancellationToken.ThrowIfCancellationRequested();
-                var result = LoadItems(
-                    scene,
-                    abdataRoot,
-                    modsRoot,
-                    parent);
+                KoikatsuStudioSceneInstance result;
+                using (ReferenceModelLoadContext.Current?.Range(0.05f, 0.85f))
+                    result = await LoadItemsAsync(scene, abdataRoot, modsRoot, parent, cancellationToken);
                 try
                 {
                     // Let Unity integrate instantiated objects before additive scene
@@ -42,10 +41,13 @@ namespace StudioEditor.ReferenceModels
                     // can block the editor's main thread on legacy scene bundles.
                     await Task.Yield();
                     cancellationToken.ThrowIfCancellationRequested();
+                    ReferenceModelLoadContext.Current?.Report(0.86f, "Loading map");
+                    using var mapRange = ReferenceModelLoadContext.Current?.Range(0.86f, 0.97f);
                     await result.LoadMapAsync(
                         abdataRoot,
                         modsRoot,
                         cancellationToken);
+                    await result.BindRenderContextAsync(abdataRoot, modsRoot, cancellationToken);
                     return result;
                 }
                 catch
@@ -81,6 +83,14 @@ namespace StudioEditor.ReferenceModels
             string modsRoot = null,
             Transform parent = null)
         {
+            return LoadItemsAsync(scene, abdataRoot, modsRoot, parent, default, false).GetAwaiter().GetResult();
+        }
+
+        public static async Task<KoikatsuStudioSceneInstance> LoadItemsAsync(
+            KoikatsuScene scene, string abdataRoot, string modsRoot = null,
+            Transform parent = null, CancellationToken cancellationToken = default,
+            bool asynchronous = true)
+        {
             if (scene == null)
             {
                 throw new ArgumentNullException(nameof(scene));
@@ -100,9 +110,16 @@ namespace StudioEditor.ReferenceModels
             var objectsByKey = new Dictionary<int, GameObject>();
             try
             {
+                if (asynchronous)
+                {
+                    using (ReferenceModelLoadContext.Current?.Range(0f, 0.15f))
+                        await KoikatsuListCatalog.LoadAsync(abdataRoot, modsRoot, cancellationToken);
+                }
+                using var objectsRange = ReferenceModelLoadContext.Current?.Range(0.15f, 1f);
+                var counter = new SceneLoadCounter { Total = Math.Max(CountObjects(scene.Objects), 1) };
                 for (var index = 0; index < scene.Objects.Count; index++)
                 {
-                    LoadObject(
+                    await LoadObjectAsync(
                         scene,
                         scene.Objects[index],
                         abdataRoot,
@@ -112,9 +129,16 @@ namespace StudioEditor.ReferenceModels
                         characters,
                         characterSources,
                         missing,
-                        objectsByKey);
+                        objectsByKey,
+                        cancellationToken,
+                        asynchronous,
+                        counter);
                 }
 
+                cancellationToken.ThrowIfCancellationRequested();
+                KoikatsuStudioScaleCompensation.Attach(root, scene.Objects, objectsByKey);
+                ReferenceModelLoadContext.Current?.Report(1f, "Binding scene", "Timeline and constraints");
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                 var objectsByTimelineIndex = objectsByKey
                     .OrderBy(pair => pair.Key)
                     .Select(pair => pair.Value)
@@ -158,7 +182,7 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
-        private static void LoadObject(
+        private static async Task LoadObjectAsync(
             KoikatsuScene scene,
             KoikatsuSceneObject source,
             string abdataRoot,
@@ -169,8 +193,17 @@ namespace StudioEditor.ReferenceModels
             IDictionary<KoikatsuReferenceModelInstance, KoikatsuSceneObject>
                 characterSources,
             ICollection<KoikatsuMissingStudioItem> missing,
-            IDictionary<int, GameObject> objectsByKey)
+            IDictionary<int, GameObject> objectsByKey,
+            CancellationToken cancellationToken,
+            bool asynchronous,
+            SceneLoadCounter counter)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = ReferenceModelLoadContext.Current;
+            using var objectRange = context?.Range(counter.Completed / (float)counter.Total,
+                (counter.Completed + 1f) / counter.Total);
+            context?.Report(0f, "Loading scene objects", $"{counter.Completed + 1}/{counter.Total} {source.Name}");
+            await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
             Transform childParent;
             GameObject loadedObject;
             if (source.Character != null)
@@ -187,13 +220,15 @@ namespace StudioEditor.ReferenceModels
                             animationResolution.Slot;
                     }
 
-                    var character = KoikatsuCharacterAssembler.BuildFromCard(
+                    var character = await KoikatsuCharacterAssembler.BuildFromCardAsync(
                         source.Character.Card,
                         abdataRoot,
                         modsRoot,
                         parent,
-                        CancellationToken.None,
-                        source.Character.ActiveCoordinateIndex);
+                        cancellationToken,
+                        source.Character.ActiveCoordinateIndex,
+                        asynchronous);
+                    characters.Add(character);
                     ApplyTransform(character.Root.transform, source.Base, parent);
                     KoikatsuStudioCharacterPose.Apply(
                         character,
@@ -201,7 +236,6 @@ namespace StudioEditor.ReferenceModels
                         abdataRoot,
                         modsRoot);
                     character.Root.SetActive(source.Base.Visible);
-                    characters.Add(character);
                     characterSources[character] = source;
                     childParent = character.Root.transform;
                     loadedObject = character.Root;
@@ -220,6 +254,9 @@ namespace StudioEditor.ReferenceModels
             {
                 try
                 {
+                    using var warmup = new KoikatsuLoadSession(cancellationToken);
+                    if (asynchronous)
+                        await warmup.WarmItemAsync(scene, source, abdataRoot, modsRoot);
                     var item = KoikatsuStudioItemLoader.Load(
                         abdataRoot,
                         scene,
@@ -275,6 +312,9 @@ namespace StudioEditor.ReferenceModels
                 objectsByKey.Add(source.Base.DicKey, loadedObject);
             }
 
+            context?.Report(1f, "Loading scene objects", $"{counter.Completed + 1}/{counter.Total} {source.Name}");
+            objectRange?.Dispose();
+            counter.Completed++;
             if (source.Character != null &&
                 source.Character.ChildGroups != null &&
                 source.Character.ChildGroups.Count != 0)
@@ -288,7 +328,7 @@ namespace StudioEditor.ReferenceModels
                         catalog) ?? childParent;
                     for (var index = 0; index < group.Value.Count; index++)
                     {
-                        LoadObject(
+                        await LoadObjectAsync(
                             scene,
                             group.Value[index],
                             abdataRoot,
@@ -298,7 +338,10 @@ namespace StudioEditor.ReferenceModels
                             characters,
                             characterSources,
                             missing,
-                            objectsByKey);
+                            objectsByKey,
+                            cancellationToken,
+                            asynchronous,
+                            counter);
                     }
                 }
             }
@@ -306,7 +349,7 @@ namespace StudioEditor.ReferenceModels
             {
                 for (var index = 0; index < source.Children.Count; index++)
                 {
-                    LoadObject(
+                    await LoadObjectAsync(
                         scene,
                         source.Children[index],
                         abdataRoot,
@@ -316,9 +359,34 @@ namespace StudioEditor.ReferenceModels
                         characters,
                         characterSources,
                         missing,
-                        objectsByKey);
+                        objectsByKey,
+                        cancellationToken,
+                        asynchronous,
+                        counter);
                 }
             }
+        }
+
+        private sealed class SceneLoadCounter
+        {
+            public int Total;
+            public int Completed;
+        }
+
+        private static int CountObjects(IReadOnlyList<KoikatsuSceneObject> objects)
+        {
+            var count = 0;
+            if (objects == null) return count;
+            foreach (var item in objects)
+            {
+                count++;
+                if (item.Character?.ChildGroups != null && item.Character.ChildGroups.Count > 0)
+                {
+                    foreach (var group in item.Character.ChildGroups) count += CountObjects(group.Value);
+                }
+                else count += CountObjects(item.Children);
+            }
+            return count;
         }
 
         internal static Transform ResolveCharacterChildParent(
@@ -409,6 +477,23 @@ namespace StudioEditor.ReferenceModels
             light.lightmapBakeType = LightmapBakeType.Realtime;
             light.renderMode = LightRenderMode.ForcePixel;
             light.enabled = source.Light.Enable;
+            result.AddComponent<ImportedLightTarget>().Audience = entry?.Target switch
+            {
+                1 => ImportedLightAudience.Characters,
+                2 => ImportedLightAudience.World,
+                _ => ImportedLightAudience.All
+            };
+            if (entry != null)
+            {
+                foreach (var bundle in catalog.ResolveBundleCandidates(abdataRoot, entry.BundlePath, null))
+                {
+                    var definition = KoikatsuStudioLightMetadata.Read(bundle, entry.AssetName);
+                    if (definition == null) continue;
+                    definition.Apply(light);
+                    result.GetComponent<ImportedLightTarget>().Audience = definition.GetAudience(entry.Target);
+                    break;
+                }
+            }
             result.SetActive(source.Base.Visible);
             return result;
         }
@@ -996,6 +1081,78 @@ namespace StudioEditor.ReferenceModels
         private List<GameObject> objectsByTimelineIndex;
         private IReadOnlyList<GameObject> readOnlyObjectsByTimelineIndex;
         private KoikatsuStudioMapInstance map;
+        private readonly List<KoikatsuAssetBundleLease> renderLeases = new();
+        private ImportedSceneRenderContext renderContext;
+        private Texture characterRamp;
+        private Texture secondaryColorLookup;
+        private Quaternion characterLightOffset = Quaternion.identity;
+
+        internal async Task BindRenderContextAsync(string abdataRoot, string modsRoot, CancellationToken token)
+        {
+            if (Scene.RenderSettings == null) return;
+            var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
+            var lookup = await LoadColorLookupAsync(catalog, abdataRoot, Scene.RenderSettings.ColorGradingId, null, token);
+            secondaryColorLookup = await LoadColorLookupAsync(catalog, abdataRoot,
+                Scene.RenderSettings.ColorGradingSecondaryId, Scene.RenderSettings.ColorGradingSecondaryGuid, token);
+            token.ThrowIfCancellationRequested();
+            if (Scene.RenderSettings.HasCharacterShading &&
+                catalog.TryGet(432, Scene.RenderSettings.CharacterRampId, null, out var rampEntry))
+            {
+                foreach (var source in catalog.ResolveBundleCandidates(abdataRoot, rampEntry.Get("MainTexAB"), rampEntry.Archive))
+                {
+                    var lease = await KoikatsuAssetBundleCache.AcquireAsync(source, token);
+                    renderLeases.Add(lease);
+                    var request = lease.Bundle.LoadAssetAsync<Texture2D>(rampEntry.Get("MainTex"));
+                    while (!request.isDone) await Task.Yield();
+                    token.ThrowIfCancellationRequested();
+                    characterRamp = request.asset as Texture2D;
+                    if (characterRamp != null) break;
+                }
+            }
+            characterLightOffset = await Task.Run(() => KoikatsuStudioLightRig.ReadCharacterLightOffset(abdataRoot), token);
+            renderContext = root.AddComponent<ImportedSceneRenderContext>();
+            RefreshRenderContext(lookup);
+        }
+
+        private async Task<Texture> LoadColorLookupAsync(KoikatsuListCatalog catalog, string abdataRoot,
+            int id, string guid, CancellationToken token)
+        {
+            if (catalog.TryGetColorFilter(id, guid, out var bundle, out var asset, out var archive))
+            {
+                foreach (var source in catalog.ResolveBundleCandidates(abdataRoot, bundle, archive))
+                {
+                    var lease = await KoikatsuAssetBundleCache.AcquireAsync(source, token);
+                    renderLeases.Add(lease);
+                    var request = lease.Bundle.LoadAssetAsync<Texture2D>(asset);
+                    while (!request.isDone) await Task.Yield();
+                    token.ThrowIfCancellationRequested();
+                    if (request.asset is Texture2D texture) return texture;
+                }
+            }
+            Debug.LogWarning($"Could not load Koikatsu Studio color filter {id} ({guid}).");
+            return null;
+        }
+
+        private void RefreshRenderContext(Texture lookup)
+        {
+            if (renderContext == null || Scene.RenderSettings == null) return;
+            var renderers = characters.Where(character => character.Root != null)
+                .SelectMany(character => character.Root.GetComponentsInChildren<Renderer>(true)).ToArray();
+            var sourceLight = Scene.RenderSettings.CharacterLight;
+            var light = new ImportedSceneLight(sourceLight.Color, sourceLight.Intensity,
+                (Quaternion.Euler(sourceLight.EulerAngles) * characterLightOffset).eulerAngles, sourceLight.Shadows);
+            renderContext.Configure(light, Scene.RenderSettings.MapLight,
+                lookup, secondaryColorLookup != null ? 1f : 1f - Scene.RenderSettings.ColorGradingBlend, renderers,
+                root.GetComponentsInChildren<ImportedLightTarget>(true), map?.MainDirectionalLight,
+                ownsSceneLighting: true, colorLookupSecondary: secondaryColorLookup,
+                colorLookupSecondaryBlend: Scene.RenderSettings.ColorGradingBlend);
+            var ambientShadow = Scene.RenderSettings.CharacterAmbientShadow;
+            ambientShadow.a = 1f - Scene.RenderSettings.CharacterAmbientShadowStrength;
+            renderContext.ConfigureCharacterShading(characterRamp, ambientShadow,
+                Scene.RenderSettings.CharacterLineDepth, Scene.RenderSettings.CharacterLineWidth,
+                useLinearLightIntensity: false);
+            renderContext.ConfigureEnvironment(map?.Environment);
+        }
 
         internal KoikatsuStudioSceneInstance(
             GameObject root,
@@ -1135,9 +1292,11 @@ namespace StudioEditor.ReferenceModels
             }
 
             characters[characterIndex] = replacement;
+            RefreshRenderContext(renderContext != null ? renderContext.ColorLookup : null);
             characterSources.Remove(character);
             characterSources[replacement] = source;
             ReplaceObjectReferences(oldRoot, newRoot);
+            root.GetComponent<KoikatsuStudioScaleCompensation>()?.Replace(oldTransform, newTransform);
             try
             {
                 character.Dispose();
@@ -1189,6 +1348,7 @@ namespace StudioEditor.ReferenceModels
                     abdataRoot,
                     modsRoot,
                     root.transform,
+                    Scene.RenderSettings?.SunLightType ?? 0,
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -1219,6 +1379,9 @@ namespace StudioEditor.ReferenceModels
                 return;
             }
 
+            if (renderContext != null) renderContext.enabled = false;
+            foreach (var lease in renderLeases) lease.Dispose();
+            renderLeases.Clear();
             map?.Dispose();
             map = null;
 
@@ -1250,6 +1413,12 @@ namespace StudioEditor.ReferenceModels
         private GameObject root;
         private List<KoikatsuAssetBundleLease> leases;
         private List<Material> runtimeMaterials;
+        private Light sourceMainLight;
+        public ImportedSceneEnvironment Environment { get; private set; }
+
+        public Light MainDirectionalLight => sourceMainLight != null ? sourceMainLight : root == null ? null : root.GetComponentsInChildren<Light>()
+            .Where(light => light.isActiveAndEnabled && light.type == LightType.Directional)
+            .OrderByDescending(light => light.intensity * light.color.maxColorComponent).FirstOrDefault();
 
         private KoikatsuStudioMapInstance(
             GameObject root,
@@ -1266,6 +1435,7 @@ namespace StudioEditor.ReferenceModels
             string abdataRoot,
             string modsRoot,
             Transform parent,
+            int sunLightType,
             CancellationToken cancellationToken)
         {
             if (source == null)
@@ -1278,7 +1448,7 @@ namespace StudioEditor.ReferenceModels
                 throw new ArgumentNullException(nameof(parent));
             }
 
-            var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
+            var catalog = await KoikatsuListCatalog.LoadAsync(abdataRoot, modsRoot, cancellationToken);
             if (!catalog.TryGetMap(source.Id, source.ModGuid, out var entry))
             {
                 throw new InvalidDataException(
@@ -1295,6 +1465,10 @@ namespace StudioEditor.ReferenceModels
             Scene loadedScene = default;
             try
             {
+                using var warmup = new KoikatsuLoadSession(cancellationToken);
+                await warmup.WarmDependenciesAsync(catalog, abdataRoot, entry.BundlePath, entry.Manifest, entry.Archive);
+                foreach (var candidate in catalog.ResolveBundleCandidates(abdataRoot, entry.BundlePath, entry.Archive))
+                    await warmup.WarmAsync(candidate, true);
                 KoikatsuStudioBundleDependencies.Acquire(
                     abdataRoot,
                     catalog,
@@ -1306,7 +1480,7 @@ namespace StudioEditor.ReferenceModels
                     entry.Archive);
                 var mapLease = KoikatsuVirtualAssetLoader.AcquireFirst(
                     mapSources,
-                    out _);
+                    out var mapSource);
                 if (mapLease == null)
                 {
                     throw new InvalidDataException(
@@ -1315,6 +1489,15 @@ namespace StudioEditor.ReferenceModels
                 }
 
                 leases.Add(mapLease);
+                KoikatsuStudioMapLighting.Definition lighting = null;
+                try
+                {
+                    lighting = await Task.Run(() => KoikatsuStudioMapLighting.Read(mapSource, entry.SceneName), cancellationToken);
+                }
+                catch (Exception exception) when (exception is IOException || exception is ArgumentException || exception is UnityException)
+                {
+                    Debug.LogWarning("Could not read the source map lighting: " + exception.Message);
+                }
 
                 var scenePath = FindScenePath(
                     mapLease.Bundle.GetAllScenePaths(),
@@ -1339,7 +1522,6 @@ namespace StudioEditor.ReferenceModels
 
                 while (!operation.isDone)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
                     await Task.Yield();
                 }
 
@@ -1387,6 +1569,13 @@ namespace StudioEditor.ReferenceModels
                     source.EulerAngles);
                 mapRoot.transform.localScale = Vector3.one;
                 DisableMapCameras(mapRoot);
+                var bakedLighting = ImportedLightmapBinding.Capture(mapRoot);
+                if (bakedLighting != null)
+                {
+                    var decode = new Material(Shader.Find("Hidden/StudioEditor/KoikatsuLightmapDecode"));
+                    try { bakedLighting.DecodeLegacyRgbm(decode); }
+                    finally { KoikatsuCharacterAssembler.DestroyRuntimeObject(decode); }
+                }
                 KoikatsuMaterialConverter.Convert(
                     mapRoot,
                     runtimeMaterials);
@@ -1401,10 +1590,14 @@ namespace StudioEditor.ReferenceModels
                 }
 
                 loadedScene = default;
-                return new KoikatsuStudioMapInstance(
+                bakedLighting?.Bind();
+                var instance = new KoikatsuStudioMapInstance(
                     mapRoot,
                     leases,
                     runtimeMaterials);
+                instance.sourceMainLight = lighting?.Apply(mapRoot, sunLightType);
+                instance.Environment = lighting?.CreateEnvironment();
+                return instance;
             }
             catch
             {

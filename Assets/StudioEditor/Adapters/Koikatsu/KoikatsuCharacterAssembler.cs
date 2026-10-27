@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using StudioEditor.Characters;
+using StudioEditor.Rendering;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -84,14 +86,83 @@ namespace StudioEditor.ReferenceModels
             new Vector3(0f, -0.2f, 0f),
             new Vector3(2f, 2f, 2f));
         public static KoikatsuReferenceModelInstance BuildFemaleBase(
+            string baseBundlePath, Transform parent, CancellationToken cancellationToken)
+        {
+            return BuildFemaleBaseAsync(baseBundlePath, parent, cancellationToken, false).GetAwaiter().GetResult();
+        }
+
+        public static KoikatsuReferenceModelInstance BuildFromCard(
+            KoikatsuCard card, string abdataRoot, string modsRoot, Transform parent,
+            CancellationToken cancellationToken, int coordinateIndex = 0)
+        {
+            return BuildFromCardAsync(card, abdataRoot, modsRoot, parent,
+                cancellationToken, coordinateIndex, false).GetAwaiter().GetResult();
+        }
+
+        private static async Task WarmCardPartsAsync(KoikatsuLoadSession session,
+            KoikatsuCard card, KoikatsuListCatalog catalog, string abdataRoot,
+            int coordinateIndex, CancellationToken token)
+        {
+            var preparedParts = 0;
+            async Task Warm(int category, int id, string property, int fallback = -1)
+            {
+                token.ThrowIfCancellationRequested();
+                var guid = card.FindSideloaderGuid(property, category, id);
+                if (!catalog.TryGet(category, id, guid, out var entry) && fallback >= 0)
+                    catalog.TryGet(category, fallback, out entry);
+                if (entry != null) await session.WarmEntryAsync(catalog, abdataRoot, entry);
+                ReferenceModelLoadContext.Current?.Report(0.2f, "Preparing character parts",
+                    $"{card.DisplayName} · {++preparedParts} parts ready");
+            }
+            if (card.Hair != null)
+                for (var index = 0; index < KoikatsuCardHair.PartCount; index++)
+                    await Warm(HairCategories[index], card.Hair.Parts[index].Id, HairProperties[index], HairDefaultSlots[index]);
+            if (card.Status != null)
+                await Warm(2, card.Status.EyesPattern, string.Empty, 0);
+            if (card.Coordinates.Count > coordinateIndex)
+            {
+                var coordinate = card.Coordinates[coordinateIndex];
+                for (var index = 0; index < ClothesCategories.Length; index++)
+                    await Warm(ClothesCategories[index], GetClothesPart(coordinate, index).Id,
+                        $"outfit{coordinateIndex}.ChaFileClothes.{ClothesProperties[index]}", 0);
+                var topId = GetClothesPart(coordinate, 0).Id;
+                var topGuid = card.FindSideloaderGuid(
+                    $"outfit{coordinateIndex}.ChaFileClothes.ClothesTop", 105, topId);
+                if (!catalog.TryGet(105, topId, topGuid, out var topEntry))
+                    catalog.TryGet(105, 0, out topEntry);
+                if (topEntry != null && int.TryParse(topEntry.Get("Kind"), out var topType) &&
+                    (topType == 1 || topType == 2))
+                {
+                    var defaults = topType == 1 ? new[] { 0, 0, 1 } : new[] { 0, 1, 1 };
+                    var prefix = topType == 1 ? "ClothesJacketSub" : "ClothesSailorSub";
+                    for (var index = 0; index < 3; index++)
+                        await Warm((topType == 1 ? 200 : 210) + index,
+                            index < coordinate.SubPartsIds.Count ? coordinate.SubPartsIds[index] : defaults[index],
+                            $"outfit{coordinateIndex}.ChaFileClothes.{prefix}{(char)('A' + index)}", defaults[index]);
+                }
+                for (var index = 0; index < coordinate.Accessories.Count; index++)
+                {
+                    var accessory = coordinate.Accessories[index];
+                    if (accessory != null && accessory.Type >= 121 && accessory.Type <= 130)
+                        await Warm(accessory.Type, accessory.Id,
+                            $"outfit{coordinateIndex}.accessory{index}.ChaFileAccessory.PartsInfo.id");
+                }
+            }
+            foreach (var relative in new[] { "list/customshape.unity3d", "list/shapecorrect/shapecorrect.unity3d", "chara/mm_base.unity3d", "chara/oo_hand.unity3d" })
+                foreach (var source in catalog.ResolveBundleCandidates(abdataRoot, relative))
+                    await session.WarmAsync(source, true);
+        }
+
+        public static async Task<KoikatsuReferenceModelInstance> BuildFemaleBaseAsync(
             string baseBundlePath,
             Transform parent,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool asynchronous = true)
         {
             var headBundlePath = Path.Combine(
                 Path.GetDirectoryName(baseBundlePath) ?? string.Empty,
                 HeadBundleFileName);
-            return BuildCharacter(
+            return await BuildCharacterAsync(
                 baseBundlePath,
                 Array.AsReadOnly(new[]
                 {
@@ -101,16 +172,18 @@ namespace StudioEditor.ReferenceModels
                 "Koikatsu Female Base (Imported)",
                 parent,
                 cancellationToken,
-                true);
+                true,
+                asynchronous: asynchronous);
         }
 
-        public static KoikatsuReferenceModelInstance BuildFromCard(
+        public static async Task<KoikatsuReferenceModelInstance> BuildFromCardAsync(
             KoikatsuCard card,
             string abdataRoot,
             string modsRoot,
             Transform parent,
             CancellationToken cancellationToken,
-            int coordinateIndex = 0)
+            int coordinateIndex = 0,
+            bool asynchronous = true)
         {
             if (card == null)
             {
@@ -133,7 +206,11 @@ namespace StudioEditor.ReferenceModels
                     "The Koikatsu outfit slot is outside the card's Coordinate list.");
             }
 
-            var catalog = KoikatsuListCatalog.Load(abdataRoot, modsRoot);
+            KoikatsuListCatalog catalog;
+            using (ReferenceModelLoadContext.Current?.Range(0f, 0.2f))
+                catalog = asynchronous
+                    ? await KoikatsuListCatalog.LoadAsync(abdataRoot, modsRoot, cancellationToken)
+                    : KoikatsuListCatalog.Load(abdataRoot, modsRoot);
             var headModGuid = card.FindSideloaderGuid(
                 "ChaFileFace.headId",
                 100,
@@ -166,7 +243,16 @@ namespace StudioEditor.ReferenceModels
                     $"Head ID {card.Face.HeadId} has no MainData entry.");
             }
 
-            return BuildCharacter(
+            using var session = new KoikatsuLoadSession(cancellationToken);
+            if (asynchronous)
+            {
+                ReferenceModelLoadContext.Current?.Report(0.2f, "Preparing resources", card.DisplayName);
+                await session.WarmAsync(new KoikatsuBundleSource(baseBundlePath));
+                await session.WarmEntryAsync(catalog, abdataRoot, headEntry);
+                await WarmCardPartsAsync(session, card, catalog, abdataRoot, coordinateIndex, cancellationToken);
+            }
+            using var buildRange = ReferenceModelLoadContext.Current?.Range(0.4f, 1f);
+            return await BuildCharacterAsync(
                 baseBundlePath,
                 headBundleSources,
                 headAssetName,
@@ -178,10 +264,11 @@ namespace StudioEditor.ReferenceModels
                 abdataRoot,
                 headEntry,
                 catalog,
-                coordinateIndex);
+                coordinateIndex,
+                asynchronous);
         }
 
-        private static KoikatsuReferenceModelInstance BuildCharacter(
+        private static async Task<KoikatsuReferenceModelInstance> BuildCharacterAsync(
             string baseBundlePath,
             IReadOnlyList<KoikatsuBundleSource> headBundleSources,
             string headAssetName,
@@ -193,7 +280,8 @@ namespace StudioEditor.ReferenceModels
             string abdataRoot = null,
             KoikatsuListEntry headEntry = null,
             KoikatsuListCatalog catalog = null,
-            int coordinateIndex = 0)
+            int coordinateIndex = 0,
+            bool asynchronous = false)
         {
             var leases = new List<KoikatsuAssetBundleLease>();
             var runtimeMaterials = new List<Material>();
@@ -202,10 +290,17 @@ namespace StudioEditor.ReferenceModels
 
             try
             {
-                var baseBundle = KoikatsuAssetBundleCache.Acquire(baseBundlePath);
+                var context = ReferenceModelLoadContext.Current;
+                context?.Report(0f, "Loading character", displayName);
+                var baseBundle = asynchronous
+                    ? await KoikatsuAssetBundleCache.AcquireAsync(new KoikatsuBundleSource(baseBundlePath), cancellationToken)
+                    : KoikatsuAssetBundleCache.Acquire(baseBundlePath);
                 leases.Add(baseBundle);
                 cancellationToken.ThrowIfCancellationRequested();
 
+                using var headWarmup = new KoikatsuLoadSession(cancellationToken);
+                if (asynchronous)
+                    foreach (var source in headBundleSources) await headWarmup.WarmAsync(source, true);
                 var headBundle = AcquireAssetBundle(
                     headBundleSources,
                     headAssetName,
@@ -213,13 +308,28 @@ namespace StudioEditor.ReferenceModels
                 leases.Add(headBundle);
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // The legacy cf_m_face_create shader is a Built-in Render
-                // Pipeline material. Its UV/color interpretation is not
-                // portable to URP, so do not execute it directly here.
-                Material faceCreateMaterial = null;
+                if (asynchronous)
+                {
+                    await KoikatsuMorphControllerLoader.PrepareAsync(loadedHeadSource, headAssetName,
+                        new KoikatsuBundleSource(baseBundlePath), cancellationToken);
+                    await Task.Run(() => KoikatsuVer02MetadataLoader.Prepare(
+                        new KoikatsuBundleSource(baseBundlePath), "p_cf_body_bone"), cancellationToken);
+                    foreach (var asset in new[] { "p_cf_body_bone", "p_cf_head_bone", female ? "p_cf_body_00" : "p_cm_body_00" })
+                    {
+                        var request = baseBundle.Bundle.LoadAssetAsync<GameObject>(asset);
+                        while (!request.isDone) await Task.Yield();
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    var headRequest = headBundle.Bundle.LoadAssetAsync<GameObject>(headAssetName);
+                    while (!headRequest.isDone) await Task.Yield();
+                }
+                context?.Report(0.15f, "Creating skeleton", displayName);
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
 
                 container = new GameObject(displayName);
+                container.SetActive(false);
                 container.transform.SetParent(parent, false);
+                container.AddComponent<CharacterShadowBinding>();
 
                 var bodyTop = new GameObject("BodyTop");
                 bodyTop.transform.SetParent(container.transform, false);
@@ -233,6 +343,8 @@ namespace StudioEditor.ReferenceModels
                 var headParent = FindRequired(bodyRoot, "cf_s_head");
                 var sharedRootBone = FindRequired(bodyRoot, "cf_j_hips");
                 var bodyBones = BuildNameMap(bodyRoot);
+                KoikatsuDynamicBoneMetadata.AttachCharacterColliders(
+                    new KoikatsuBundleSource(baseBundlePath), "p_cf_body_bone", bodySkeleton);
 
                 var headSkeleton = InstantiateRequired(
                     baseBundle.Bundle,
@@ -273,6 +385,8 @@ namespace StudioEditor.ReferenceModels
                     sharedRootBone,
                     "cf_J_N_FaceRoot");
 
+                context?.Report(0.3f, "Applying character shape", displayName);
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                 if (card != null)
                 {
                     KoikatsuShapeApplicator.Apply(
@@ -291,6 +405,42 @@ namespace StudioEditor.ReferenceModels
                         leases,
                         card,
                         runtimeTextures);
+                    // The creation material lives in mm_base, independently
+                    // of the character's skeleton/mesh bundle.
+                    var faceCreateMaterial = textureLoader.LoadVanillaMaterial(
+                        "chara/mm_base.unity3d", "cf_m_face_create");
+                    // Apply card defaults before MaterialEditor so its saved
+                    // overrides remain authoritative when materials convert.
+                    var bodyAppearance = card.Body.Appearance;
+                    var bodyDetailNormal = textureLoader.LoadCatalogTexture(420, bodyAppearance.DetailId,
+                        "MainAB", "NormallMapDetail", "ChaFileBody.detailId");
+                    var bodyDetailLines = textureLoader.LoadCatalogTexture(420, bodyAppearance.DetailId,
+                        "MainAB", "LineMask", "ChaFileBody.detailId");
+                    foreach (var renderer in bodyModel.GetComponentsInChildren<Renderer>(true))
+                    foreach (var material in renderer.materials)
+                    {
+                        if (material?.shader?.name != "Shader Forge/main_skin") continue;
+                        runtimeMaterials.Add(material);
+                        material.SetTexture("_NormalMapDetail", bodyDetailNormal);
+                        material.SetTexture("_LineMask", bodyDetailLines);
+                        material.SetFloat("_DetailNormalMapScale", bodyAppearance.DetailPower);
+                        material.SetFloat("_SpecularPower", bodyAppearance.SkinGlossPower);
+                    }
+                    var faceAppearance = card.Face.Appearance;
+                    var faceDetailNormal = textureLoader.LoadCatalogTexture(400, faceAppearance.DetailId,
+                        "MainAB", "NormallMapDetail", "ChaFileFace.detailId");
+                    var faceDetailLines = textureLoader.LoadCatalogTexture(400, faceAppearance.DetailId,
+                        "MainAB", "LineMask", "ChaFileFace.detailId");
+                    foreach (var renderer in headModel.GetComponentsInChildren<Renderer>(true))
+                    foreach (var material in renderer.materials)
+                    {
+                        if (material?.shader?.name != "Shader Forge/main_skin") continue;
+                        runtimeMaterials.Add(material);
+                        material.SetTexture("_NormalMapDetail", faceDetailNormal);
+                        material.SetTexture("_LineMask", faceDetailLines);
+                        material.SetFloat("_DetailNormalMapScale", faceAppearance.DetailPower);
+                        material.SetFloat("_SpecularPower", faceAppearance.CheekGlossPower);
+                    }
                     KoikatsuMaterialConverter.ApplyMaterialEditorMainTextures(
                         bodyModel,
                         textureLoader,
@@ -299,7 +449,9 @@ namespace StudioEditor.ReferenceModels
                         headModel,
                         textureLoader,
                         4);
-                    LoadHair(
+                    context?.Report(0.4f, "Loading hair", displayName);
+                    await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
+                    await LoadHairAsync(
                         card,
                         abdataRoot,
                         catalog,
@@ -308,11 +460,13 @@ namespace StudioEditor.ReferenceModels
                         runtimeMaterials,
                         textureLoader,
                         coordinateIndex,
-                        cancellationToken);
-                    var clothesLoadResult = default(KoikatsuClothesLoadResult);
+                        cancellationToken, asynchronous);
+                    context?.Report(0.5f, "Loading clothing", displayName);
+                    await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
+                    var clothesState = new KoikatsuClothesLoadState();
                     try
                     {
-                        LoadClothes(
+                        await LoadClothesAsync(
                             card,
                             catalog,
                             bodyTop.transform,
@@ -322,9 +476,9 @@ namespace StudioEditor.ReferenceModels
                             runtimeMaterials,
                             runtimeTextures,
                             textureLoader,
-                            ref clothesLoadResult,
+                            clothesState,
                             coordinateIndex,
-                            cancellationToken);
+                            cancellationToken, asynchronous);
                     }
                     catch (Exception exception) when (
                         IsOptionalPartFailure(exception))
@@ -334,9 +488,12 @@ namespace StudioEditor.ReferenceModels
                             $"'{card.DisplayName}': {exception.Message}");
                     }
 
+                    var clothesLoadResult = clothesState.Value;
+                    context?.Report(0.65f, "Loading accessories", displayName);
+                    await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                     try
                     {
-                        LoadAccessories(
+                        await LoadAccessoriesAsync(
                             card,
                             abdataRoot,
                             catalog,
@@ -348,7 +505,7 @@ namespace StudioEditor.ReferenceModels
                             runtimeMaterials,
                             textureLoader,
                             coordinateIndex,
-                            cancellationToken);
+                            cancellationToken, asynchronous);
                     }
                     catch (Exception exception) when (
                         IsOptionalPartFailure(exception))
@@ -358,8 +515,10 @@ namespace StudioEditor.ReferenceModels
                             $"'{card.DisplayName}': {exception.Message}");
                     }
 
+                    context?.Report(0.75f, "Creating character textures", displayName);
+                    await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                     var bodyTexture = baseBundle.Bundle.LoadAsset<Texture2D>(
-                        female ? "cf_body_00_t" : "cm_body_00_t");
+                        "cf_body_00_t");
                     bodyTexture = KoikatsuOverlayTextureBaker.Composite(
                         bodyTexture,
                         textureLoader.LoadSkinOverlayTexture(
@@ -367,6 +526,11 @@ namespace StudioEditor.ReferenceModels
                             KoikatsuSkinOverlayType.BodyUnder),
                         runtimeTextures,
                         "Koikatsu Body (KSOX underlay)");
+                    var bodyInputTexture = bodyTexture;
+                    bodyTexture = KoikatsuBodyTextureBaker.Bake(bodyTexture,
+                        baseBundle.Bundle.LoadAsset<Texture2D>(female ? "cf_body_00_mc" : "cm_body_00_mc"),
+                        card.Body.Appearance, textureLoader, catalog, runtimeTextures);
+                    bool hasBakedBodyColor = bodyTexture != bodyInputTexture;
                     bodyTexture = KoikatsuBodyMaskBaker.Bake(
                         bodyTexture,
                         clothesLoadResult.BodyAlphaMask,
@@ -407,6 +571,7 @@ namespace StudioEditor.ReferenceModels
                         textureLoader,
                         coordinateIndex,
                         runtimeTextures);
+                    bool hasBakedFaceColor = faceTexture != faceBaseTexture;
                     faceTexture = KoikatsuOverlayTextureBaker.Composite(
                         faceTexture,
                         textureLoader.LoadSkinOverlayTexture(
@@ -425,7 +590,7 @@ namespace StudioEditor.ReferenceModels
                         textureLoader);
                     KoikatsuMaterialConverter.ConvertSkin(
                         bodyModel,
-                        card.Body.Appearance.SkinMainColor,
+                        hasBakedBodyColor ? Color.white : card.Body.Appearance.SkinMainColor,
                         bodyTexture,
                         "o_body",
                         clothesLoadResult.BodyAlphaMask != null,
@@ -437,7 +602,8 @@ namespace StudioEditor.ReferenceModels
                         eyeTextures,
                         card.Face.Appearance,
                         faceTextures,
-                        runtimeMaterials);
+                        runtimeMaterials,
+                        hasBakedFaceColor);
                     // Face-detail textures are applied after conversion so
                     // MaterialEditor remains the final source of truth for
                     // eye lines, brows, nose lines, and other face layers.
@@ -451,9 +617,7 @@ namespace StudioEditor.ReferenceModels
                     KoikatsuMaterialConverter.ConfigureFaceRenderQueues(
                         headModel,
                         card.Face.Appearance);
-                    KoikatsuFaceNormalProxyBuilder.Attach(
-                        headModel,
-                        faceRoot);
+                    ApplyImportedEyeAppearance(headModel, card.Status, catalog, textureLoader);
                 }
                 else
                 {
@@ -465,6 +629,8 @@ namespace StudioEditor.ReferenceModels
                         runtimeMaterials);
                 }
 
+                context?.Report(0.9f, "Binding character controls", displayName);
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                 KoikatsuVer02MetadataLoader.Attach(
                     new KoikatsuBundleSource(baseBundlePath),
                     "p_cf_body_bone",
@@ -507,7 +673,28 @@ namespace StudioEditor.ReferenceModels
                     abdataRoot,
                     catalog,
                     new KoikatsuBundleSource(baseBundlePath));
+                character.AttachJointCorrections(bodySkeleton.transform);
+                if (female)
+                {
+                    character.Controls.Pose.Pipeline.RegisterModifier(
+                        new KoikatsuHandSizeCorrection(characterSkeleton));
+                    character.Controls.Pose.Pipeline.EvaluateNow();
+                }
                 ApplyImportedExpression(character, card?.Status, catalog);
+                await KoikatsuCharacterShading.ConfigureAsync(catalog, abdataRoot,
+                    container, leases, cancellationToken, asynchronous);
+                var faceFrame = FindByName(headSkeleton.transform, "cf_J_FaceBase");
+                if (faceFrame != null)
+                {
+                    foreach (var renderer in headModel.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    {
+                        if (renderer.name != "cf_O_face") continue;
+                        renderer.gameObject.AddComponent<FaceShadowBinding>().Configure(renderer, faceFrame, headSkeleton.transform);
+                    }
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                container.SetActive(true);
+                context?.Report(1f, "Character ready", displayName);
                 return character;
             }
             catch
@@ -549,7 +736,9 @@ namespace StudioEditor.ReferenceModels
             ApplyPattern(
                 character.Controls?.Eyes?.Open,
                 ResolveEyeMorphPattern(catalog, status.EyesPattern),
-                status.EyesOpenMax);
+                Mathf.Min(status.EyesOpenMax, 0.92f));
+            if (!status.EyesBlink)
+                character.Controls?.Eyes?.Open?.SetOpenRate(status.EyesOpenMax);
 
             var mouth = character.Controls?.Mouth;
             if (mouth != null && mouth.PatternCount > 0)
@@ -601,6 +790,63 @@ namespace StudioEditor.ReferenceModels
             return int.TryParse(entry.Get("EyesPtn"), out var pattern)
                 ? Math.Max(pattern, 0)
                 : 0;
+        }
+
+        internal static void ApplyImportedEyeAppearance(GameObject head,
+            KoikatsuCardStatus status, KoikatsuListCatalog catalog, KoikatsuTextureLoader textures)
+        {
+            if (head == null || status == null || catalog == null) return;
+            int id = status.EyesPattern;
+            if (!catalog.TryGet(2, id, out var entry) && !catalog.TryGet(2, id = 0, out entry)) return;
+            static int Value(KoikatsuListEntry row, string key, int fallback) =>
+                int.TryParse(row.Get(key), out var result) ? result : fallback;
+            int special = Value(entry, "EyeObjNo", 0);
+            foreach (var transform in head.GetComponentsInChildren<Transform>(true))
+            {
+                if (transform.name == "n_eyebase") transform.gameObject.SetActive(Value(entry, "EyeBase", 1) == 1);
+                if (transform.name == "n_hitomi") transform.gameObject.SetActive(Value(entry, "EyeHitomi", 1) != 0);
+            }
+            var texture = special > 0 && textures != null
+                ? textures.LoadCatalogTexture(2, id, "MainTexAB", "MainTex") : null;
+            var irisExpression = textures != null && entry.Get("EpsTexAB") != "0" && entry.Get("EpsTex") != "0"
+                ? textures.LoadCatalogTexture(2, id, "EpsTexAB", "EpsTex") : null;
+            foreach (var renderer in head.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer.name.StartsWith("cf_Ohitomi", StringComparison.Ordinal) && !renderer.name.Contains(" "))
+                    foreach (var material in renderer.sharedMaterials)
+                        if (material != null && material.HasProperty("_IrisExpressionMap"))
+                        {
+                            material.SetTexture("_IrisExpressionMap", irisExpression);
+                            material.SetFloat("_IrisExpressionStrength", irisExpression != null ? 1f : 0f);
+                        }
+                for (int index = 0; index < 3; index++)
+                {
+                    if (renderer.name != $"cf_O_gag_eye_{index:00}") continue;
+                    bool selected = special == index + 1;
+                    renderer.gameObject.SetActive(selected);
+                    renderer.enabled = selected;
+                    if (!selected) continue;
+                    foreach (var material in renderer.sharedMaterials)
+                    {
+                        if (material == null) continue;
+                        MaterialRenderUtility.SetMainTexture(material, texture);
+                        MaterialRenderUtility.SetBaseColor(material, Color.white);
+                        var tile = entry.Get("TileAnim").Split('/');
+                        var animation = new Vector4(1, 1, 0, 0);
+                        for (int axis = 0; axis < Mathf.Min(3, tile.Length); axis++)
+                            if (float.TryParse(tile[axis], System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var value)) animation[axis] = value;
+                        if (material.HasProperty("_TileAnimation")) material.SetVector("_TileAnimation", animation);
+                        foreach (var key in new[] { "SizeSpeed", "SizeWidth", "AngleSpeed", "Yurayura" })
+                        {
+                            var property = key == "Yurayura" ? "_yurayura" : "_" + key;
+                            if (material.HasProperty(property) && float.TryParse(entry.Get(key),
+                                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
+                                material.SetFloat(property, value);
+                        }
+                    }
+                }
+            }
         }
 
         private static bool IsOptionalPartFailure(Exception exception)
@@ -690,7 +936,7 @@ namespace StudioEditor.ReferenceModels
             };
         }
 
-        private static void LoadHair(
+        private static async Task LoadHairAsync(
             KoikatsuCard card,
             string abdataRoot,
             KoikatsuListCatalog catalog,
@@ -699,7 +945,7 @@ namespace StudioEditor.ReferenceModels
             List<Material> runtimeMaterials,
             KoikatsuTextureLoader textureLoader,
             int coordinateIndex,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, bool asynchronous)
         {
             if (card.Hair == null || catalog == null)
             {
@@ -712,14 +958,14 @@ namespace StudioEditor.ReferenceModels
                 leases,
                 runtimeMaterials);
             var hairGloss = textureLoader.LoadCatalogTexture(
-                439,
+                433,
                 card.Hair.GlossId,
                 "MainTexAB",
                 "MainTex",
                 "ChaFileHair.glossId");
             for (var index = 0; index < KoikatsuCardHair.PartCount; index++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                 var part = card.Hair.Parts[index];
                 loader.Load(
                     new KoikatsuAssetRequest(
@@ -746,7 +992,7 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
-        private static void LoadClothes(
+        private static async Task LoadClothesAsync(
             KoikatsuCard card,
             KoikatsuListCatalog catalog,
             Transform bodyTop,
@@ -756,177 +1002,229 @@ namespace StudioEditor.ReferenceModels
             List<Material> runtimeMaterials,
             List<Texture2D> runtimeTextures,
             KoikatsuTextureLoader textureLoader,
-            ref KoikatsuClothesLoadResult loadResult,
+            KoikatsuClothesLoadState state,
             int coordinateIndex,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, bool asynchronous)
         {
-            if (card.Coordinates == null || card.Coordinates.Count == 0)
+            var loadResult = state.Value;
+            try
             {
-                return;
-            }
-
-            var coordinate = card.Coordinates[coordinateIndex];
-            var resolver = new KoikatsuVanillaAssetResolver(
-                textureLoader.AbdataRoot,
-                catalog,
-                card);
-            var loader = new KoikatsuPartLoader(
-                resolver,
-                leases,
-                runtimeMaterials);
-            var topPart = GetClothesPart(coordinate, 0);
-            var topState = GetClothesState(card.Status, 0);
-            var useMaskRedChannel = topState == 0;
-            var useMaskGreenChannel = topState != 3;
-            var topProperty =
-                $"outfit{coordinateIndex}.ChaFileClothes.{ClothesProperties[0]}";
-            catalog.TryGet(
-                105,
-                topPart.Id,
-                card.FindSideloaderGuid(topProperty, 105, topPart.Id),
-                out var topEntry);
-            var suppressBottom = topEntry?.Get("Coordinate") == "2";
-            var suppressBra = topEntry?.Get("NotBra") == "1";
-            var braPart = GetClothesPart(coordinate, 2);
-            var braProperty =
-                $"outfit{coordinateIndex}.ChaFileClothes.{ClothesProperties[2]}";
-            catalog.TryGet(
-                107,
-                braPart.Id,
-                card.FindSideloaderGuid(braProperty, 107, braPart.Id),
-                out var braEntry);
-            var suppressShorts = !suppressBra &&
-                                 braEntry?.Get("Coordinate") == "2";
-            var bodyAlphaMask = textureLoader.LoadCatalogTexture(
-                105,
-                topPart.Id,
-                "OverBodyMaskAB",
-                "OverBodyMask",
-                topProperty);
-            var braAlphaMask = textureLoader.LoadCatalogTexture(
-                105,
-                topPart.Id,
-                "OverBraMaskAB",
-                "OverBraMask",
-                topProperty);
-            var topPartMasks = ResolveTopPartMasks(
-                coordinate,
-                topEntry,
-                textureLoader,
-                coordinateIndex);
-            if (topPartMasks.OverridesBaseMasks)
-            {
-                bodyAlphaMask = topPartMasks.BodyAlphaMask;
-                braAlphaMask = topPartMasks.BraAlphaMask;
-            }
-
-            var topEmblem01 = LoadEmblemTexture(
-                topPart,
-                topProperty,
-                textureLoader,
-                0);
-            var topEmblem02 = LoadEmblemTexture(
-                topPart,
-                topProperty,
-                textureLoader,
-                1);
-            var coversGroin = suppressBottom || suppressShorts;
-            loadResult = new KoikatsuClothesLoadResult(
-                useMaskGreenChannel ? bodyAlphaMask : null,
-                coversGroin,
-                useMaskRedChannel,
-                useMaskGreenChannel);
-
-            GameObject topObject = null;
-            GameObject innerShoes = null;
-            GameObject outerShoes = null;
-            for (var index = 0; index < ClothesCategories.Length; index++)
-            {
-                if ((index == 1 && suppressBottom) ||
-                    (index == 2 && suppressBra) ||
-                    (index == 3 && suppressShorts))
+                if (card.Coordinates == null || card.Coordinates.Count == 0)
                 {
-                    continue;
+                    return;
                 }
 
-                cancellationToken.ThrowIfCancellationRequested();
-                var part = GetClothesPart(coordinate, index);
-                var property =
-                    $"outfit{coordinateIndex}.ChaFileClothes." +
-                    ClothesProperties[index];
-                var textures = textureLoader.LoadPartTextures(
-                    ClothesCategories[index],
-                    part.Id,
-                    property);
-                var bakedTextures = KoikatsuClothesTextureBaker.Bake(
-                    textures,
-                    part,
-                    0,
+                var coordinate = card.Coordinates[coordinateIndex];
+                var resolver = new KoikatsuVanillaAssetResolver(
+                    textureLoader.AbdataRoot,
+                    catalog,
+                    card);
+                var loader = new KoikatsuPartLoader(
+                    resolver,
+                    leases,
+                    runtimeMaterials);
+                var topPart = GetClothesPart(coordinate, 0);
+                var topState = GetClothesState(card.Status, 0);
+                var useMaskRedChannel = topState == 0;
+                var useMaskGreenChannel = topState != 3;
+                var topProperty =
+                    $"outfit{coordinateIndex}.ChaFileClothes.{ClothesProperties[0]}";
+                catalog.TryGet(
+                    105,
+                    topPart.Id,
+                    card.FindSideloaderGuid(topProperty, 105, topPart.Id),
+                    out var topEntry);
+                var suppressBottom = topEntry?.Get("Coordinate") == "2";
+                var suppressBra = topEntry?.Get("NotBra") == "1";
+                var braPart = GetClothesPart(coordinate, 2);
+                var braProperty =
+                    $"outfit{coordinateIndex}.ChaFileClothes.{ClothesProperties[2]}";
+                catalog.TryGet(
+                    107,
+                    braPart.Id,
+                    card.FindSideloaderGuid(braProperty, 107, braPart.Id),
+                    out var braEntry);
+                var suppressShorts = !suppressBra &&
+                                     braEntry?.Get("Coordinate") == "2";
+                var bodyAlphaMask = textureLoader.LoadCatalogTexture(
+                    105,
+                    topPart.Id,
+                    "OverBodyMaskAB",
+                    "OverBodyMask",
+                    topProperty);
+                var braAlphaMask = textureLoader.LoadCatalogTexture(
+                    105,
+                    topPart.Id,
+                    "OverBraMaskAB",
+                    "OverBraMask",
+                    topProperty);
+                var topPartMasks = ResolveTopPartMasks(
+                    coordinate,
+                    topEntry,
                     textureLoader,
-                    runtimeTextures);
-                var emblem01 = LoadEmblemTexture(
-                    part,
-                    property,
+                    coordinateIndex);
+                if (topPartMasks.OverridesBaseMasks)
+                {
+                    bodyAlphaMask = topPartMasks.BodyAlphaMask;
+                    braAlphaMask = topPartMasks.BraAlphaMask;
+                }
+
+                var topEmblem01 = LoadEmblemTexture(
+                    topPart,
+                    topProperty,
                     textureLoader,
                     0);
-                var emblem02 = LoadEmblemTexture(
-                    part,
-                    property,
+                var topEmblem02 = LoadEmblemTexture(
+                    topPart,
+                    topProperty,
                     textureLoader,
                     1);
-                var instance = loader.Load(
-                    new KoikatsuAssetRequest(
+                var coversGroin = suppressBottom || suppressShorts;
+                loadResult = new KoikatsuClothesLoadResult(
+                    useMaskGreenChannel ? bodyAlphaMask : null,
+                    coversGroin,
+                    useMaskRedChannel,
+                    useMaskGreenChannel);
+
+                GameObject topObject = null;
+                GameObject innerShoes = null;
+                GameObject outerShoes = null;
+                for (var index = 0; index < ClothesCategories.Length; index++)
+                {
+                    if ((index == 1 && suppressBottom) ||
+                        (index == 2 && suppressBra) ||
+                        (index == 3 && suppressShorts))
+                    {
+                        continue;
+                    }
+
+                    await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
+                    var part = GetClothesPart(coordinate, index);
+                    var property =
+                        $"outfit{coordinateIndex}.ChaFileClothes." +
+                        ClothesProperties[index];
+                    var textures = textureLoader.LoadPartTextures(
                         ClothesCategories[index],
                         part.Id,
+                        property);
+                    var bakedTextures = KoikatsuClothesTextureBaker.Bake(
+                        textures,
+                        part,
+                        0,
+                        textureLoader,
+                        runtimeTextures);
+                    var emblem01 = LoadEmblemTexture(
+                        part,
                         property,
-                        0),
-                    new KoikatsuPartLoadOptions
-                    {
-                        Parent = bodyTop,
-                        ObjectName = ClothesObjectNames[index],
-                        SkinningMode = KoikatsuSkinningMode.Body,
-                        TargetBones = bodyBones,
-                        SharedRootBone = sharedRootBone,
-                        ClothesMaterial = part,
-                        Textures = textures,
-                        BakedClothesTextures = bakedTextures,
-                        TextureLoader = textureLoader,
-                        ClothesEmblem01 = emblem01,
-                        ClothesEmblem02 = emblem02,
-                        ClothesAlphaMask = index == 2 && useMaskGreenChannel
-                            ? braAlphaMask
-                            : null,
-                        ClothesAlphaMaskUseRedChannel = useMaskRedChannel,
-                        ClothesAlphaMaskUseGreenChannel = useMaskGreenChannel,
-                        ClothesAlphaMaskScale = index == 2
-                            ? GetBraMaskScale(braEntry).Scale
-                            : Vector2.one,
-                        ClothesAlphaMaskOffset = index == 2
-                            ? GetBraMaskScale(braEntry).Offset
-                            : Vector2.zero,
-                        RuntimeTextures = runtimeTextures,
-                        ShowClothesOption01 = IsClothesOptionVisible(
-                            coordinate,
-                            index,
-                            part,
+                        textureLoader,
+                        0);
+                    var emblem02 = LoadEmblemTexture(
+                        part,
+                        property,
+                        textureLoader,
+                        1);
+                    var instance = loader.Load(
+                        new KoikatsuAssetRequest(
+                            ClothesCategories[index],
+                            part.Id,
+                            property,
                             0),
-                        ShowClothesOption02 = IsClothesOptionVisible(
-                            coordinate,
-                            index,
-                            part,
-                            1),
-                        ClothesSleevesType = index == 0
-                            ? part.SleevesType
-                            : -1,
-                        MaterialEditorObjectType = 1,
-                        MaterialEditorCoordinateIndex = coordinateIndex,
-                        MaterialEditorSlot = index,
-                    });
-                ApplyWornClothesState(instance, index, card.Status);
-                if (index == 1 || index == 3)
+                        new KoikatsuPartLoadOptions
+                        {
+                            Parent = bodyTop,
+                            ObjectName = ClothesObjectNames[index],
+                            SkinningMode = KoikatsuSkinningMode.Body,
+                            TargetBones = bodyBones,
+                            SharedRootBone = sharedRootBone,
+                            ClothesMaterial = part,
+                            Textures = textures,
+                            BakedClothesTextures = bakedTextures,
+                            TextureLoader = textureLoader,
+                            ClothesEmblem01 = emblem01,
+                            ClothesEmblem02 = emblem02,
+                            ClothesAlphaMask = index == 2 && useMaskGreenChannel
+                                ? braAlphaMask
+                                : null,
+                            ClothesAlphaMaskUseRedChannel = useMaskRedChannel,
+                            ClothesAlphaMaskUseGreenChannel = useMaskGreenChannel,
+                            ClothesAlphaMaskScale = index == 2
+                                ? GetBraMaskScale(braEntry).Scale
+                                : Vector2.one,
+                            ClothesAlphaMaskOffset = index == 2
+                                ? GetBraMaskScale(braEntry).Offset
+                                : Vector2.zero,
+                            RuntimeTextures = runtimeTextures,
+                            ShowClothesOption01 = IsClothesOptionVisible(
+                                coordinate,
+                                index,
+                                part,
+                                0),
+                            ShowClothesOption02 = IsClothesOptionVisible(
+                                coordinate,
+                                index,
+                                part,
+                                1),
+                            ClothesSleevesType = index == 0
+                                ? part.SleevesType
+                                : -1,
+                            MaterialEditorObjectType = 1,
+                            MaterialEditorCoordinateIndex = coordinateIndex,
+                            MaterialEditorSlot = index,
+                        });
+                    ApplyWornClothesState(instance, index, card.Status);
+                    if (index == 1 || index == 3)
+                    {
+                        coversGroin |= instance != null &&
+                                       GetClothesState(card.Status, index) == 0;
+                        loadResult = new KoikatsuClothesLoadResult(
+                            useMaskGreenChannel ? bodyAlphaMask : null,
+                            coversGroin,
+                            useMaskRedChannel,
+                            useMaskGreenChannel);
+                    }
+
+                    if (index == 0)
+                    {
+                        topObject = instance;
+                    }
+                    else if (index == 7)
+                    {
+                        innerShoes = instance;
+                    }
+                    else if (index == 8)
+                    {
+                        outerShoes = instance;
+                    }
+                }
+
+                if (topObject == null)
                 {
-                    coversGroin |= instance != null &&
-                                   GetClothesState(card.Status, index) == 0;
+                    topObject = new GameObject(ClothesObjectNames[0]);
+                    topObject.transform.SetParent(bodyTop, false);
+                }
+
+                var topPartsBodyMask = await LoadTopPartsAsync(
+                    coordinate,
+                    topPart,
+                    topEntry,
+                    catalog,
+                    topObject.transform,
+                    bodyBones,
+                    sharedRootBone,
+                    loader,
+                    textureLoader,
+                    runtimeTextures,
+                    coordinateIndex,
+                    cancellationToken,
+                    topPartMasks.InnerAlphaMask,
+                    topEmblem01,
+                    topEmblem02,
+                    topState,
+                    useMaskRedChannel,
+                    useMaskGreenChannel, asynchronous);
+                if (topPartsBodyMask != null)
+                {
+                    bodyAlphaMask = topPartsBodyMask;
                     loadResult = new KoikatsuClothesLoadResult(
                         useMaskGreenChannel ? bodyAlphaMask : null,
                         coversGroin,
@@ -934,57 +1232,9 @@ namespace StudioEditor.ReferenceModels
                         useMaskGreenChannel);
                 }
 
-                if (index == 0)
-                {
-                    topObject = instance;
-                }
-                else if (index == 7)
-                {
-                    innerShoes = instance;
-                }
-                else if (index == 8)
-                {
-                    outerShoes = instance;
-                }
+                ApplyShoesType(innerShoes, outerShoes, card.Status?.ShoesType ?? 0);
             }
-
-            if (topObject == null)
-            {
-                topObject = new GameObject(ClothesObjectNames[0]);
-                topObject.transform.SetParent(bodyTop, false);
-            }
-
-            var topPartsBodyMask = LoadTopParts(
-                coordinate,
-                topPart,
-                topEntry,
-                catalog,
-                topObject.transform,
-                bodyBones,
-                sharedRootBone,
-                loader,
-                textureLoader,
-                runtimeTextures,
-                coordinateIndex,
-                cancellationToken,
-                topPartMasks.InnerAlphaMask,
-                topEmblem01,
-                topEmblem02,
-                topState,
-                useMaskRedChannel,
-                useMaskGreenChannel);
-            if (topPartsBodyMask != null)
-            {
-                bodyAlphaMask = topPartsBodyMask;
-                loadResult = new KoikatsuClothesLoadResult(
-                    useMaskGreenChannel ? bodyAlphaMask : null,
-                    coversGroin,
-                    useMaskRedChannel,
-                    useMaskGreenChannel);
-            }
-
-            ApplyShoesType(innerShoes, outerShoes, card.Status?.ShoesType ?? 0);
-
+            finally { state.Value = loadResult; }
         }
 
         private static KoikatsuTopPartMasks ResolveTopPartMasks(
@@ -1087,7 +1337,7 @@ namespace StudioEditor.ReferenceModels
                 : new KoikatsuMaskTransform(Vector2.one, Vector2.zero);
         }
 
-        private static Texture2D LoadTopParts(
+        private static async Task<Texture2D> LoadTopPartsAsync(
             KoikatsuCardCoordinate coordinate,
             KoikatsuCardClothesPart topPart,
             KoikatsuListEntry topEntry,
@@ -1105,7 +1355,8 @@ namespace StudioEditor.ReferenceModels
             Texture2D emblem02,
             byte topState,
             bool useMaskRedChannel,
-            bool useMaskGreenChannel)
+            bool useMaskGreenChannel,
+            bool asynchronous)
         {
             if (topEntry == null ||
                 !int.TryParse(topEntry.Get("Kind"), out var topType) ||
@@ -1127,7 +1378,7 @@ namespace StudioEditor.ReferenceModels
             Texture2D bodyAlphaMask = null;
             for (var index = 0; index < objectNames.Length; index++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                 var id = index < coordinate.SubPartsIds.Count
                     ? coordinate.SubPartsIds[index]
                     : defaults[index];
@@ -1410,7 +1661,7 @@ namespace StudioEditor.ReferenceModels
                    optionIndex >= hidden.Count || !hidden[optionIndex];
         }
 
-        private static void LoadAccessories(
+        private static async Task LoadAccessoriesAsync(
             KoikatsuCard card,
             string abdataRoot,
             KoikatsuListCatalog catalog,
@@ -1422,7 +1673,7 @@ namespace StudioEditor.ReferenceModels
             List<Material> runtimeMaterials,
             KoikatsuTextureLoader textureLoader,
             int coordinateIndex,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, bool asynchronous)
         {
             if (card.Coordinates == null || card.Coordinates.Count == 0)
             {
@@ -1439,7 +1690,7 @@ namespace StudioEditor.ReferenceModels
                 : null;
             for (var slot = 0; slot < coordinate.Accessories.Count; slot++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                 var accessory = coordinate.Accessories[slot];
                 var property =
                     $"outfit{coordinateIndex}.accessory{slot}." +
@@ -1805,6 +2056,11 @@ namespace StudioEditor.ReferenceModels
             }
         }
 
+        private sealed class KoikatsuClothesLoadState
+        {
+            public KoikatsuClothesLoadResult Value;
+        }
+
         private readonly struct KoikatsuClothesLoadResult
         {
             public KoikatsuClothesLoadResult(
@@ -1883,6 +2139,7 @@ namespace StudioEditor.ReferenceModels
         private CharacterEyeOpenController eyeOpenController;
         private CharacterEyebrowController eyebrowController;
         private CharacterHandPoseController handPoseController;
+        private KoikatsuJointCorrection jointCorrection;
         private CharacterEyeLookController eyeLookController;
         private ICharacterControls controls;
         private List<KoikatsuAssetBundleLease> bundleLeases;
@@ -1925,12 +2182,23 @@ namespace StudioEditor.ReferenceModels
             this.variantNames = variantNames ??
                 throw new ArgumentNullException(nameof(variantNames));
             ActiveVariantIndex = activeVariantIndex;
-            SetPhysicsEnabled(false);
+            SetPhysicsEnabled(true);
         }
 
         public string DisplayName => root != null ? root.name : string.Empty;
 
         public GameObject Root => root;
+
+        internal void AttachJointCorrections(Transform bodyRoot)
+        {
+            jointCorrection = new KoikatsuJointCorrection(characterSkeleton, bodyRoot);
+            poseCoordinator.RegisterModifier(jointCorrection);
+        }
+
+        internal void ConfigureJointCorrections(IReadOnlyList<bool> enabled)
+        {
+            jointCorrection?.Configure(enabled);
+        }
 
         internal KoikatsuCard SourceCard => sourceCard;
 
@@ -2166,6 +2434,7 @@ namespace StudioEditor.ReferenceModels
                 root,
                 characterSkeleton,
                 poseCoordinator);
+            eyeOpenController?.SetLookController(eyeLookController);
             controls = new CharacterControlSet(
                 poseCoordinator,
                 this,
@@ -2223,6 +2492,7 @@ namespace StudioEditor.ReferenceModels
             eyeOpenController = null;
             eyebrowController = null;
             handPoseController = null;
+            jointCorrection = null;
             eyeLookController = null;
             controls = null;
         }

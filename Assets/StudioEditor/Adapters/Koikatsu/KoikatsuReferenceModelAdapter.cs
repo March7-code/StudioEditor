@@ -39,7 +39,7 @@ namespace StudioEditor.ReferenceModels
                 cancellationToken);
         }
 
-        public Task<IReferenceModelInstance> ImportVariantAsync(
+        public async Task<IReferenceModelInstance> ImportVariantAsync(
             string filePath,
             Transform parent,
             int variantIndex,
@@ -52,16 +52,19 @@ namespace StudioEditor.ReferenceModels
                     filePath);
             }
 
+            StudioEditorDiskCache.Initialize();
             cancellationToken.ThrowIfCancellationRequested();
+            await ReferenceModelLoadContext.YieldAsync(cancellationToken);
+            ReferenceModelLoadContext.Current?.Report(0.02f, "Reading character card", Path.GetFileName(filePath));
             KoikatsuReferenceModelInstance instance;
             if (string.Equals(
                     Path.GetExtension(filePath),
                     ".png",
                     StringComparison.OrdinalIgnoreCase))
             {
-                var card = KoikatsuCardReader.Read(filePath);
+                var card = await Task.Run(() => KoikatsuCardReader.Read(filePath), cancellationToken);
                 var installation = KoikatsuInstallation.Find(filePath);
-                instance = KoikatsuCharacterAssembler.BuildFromCard(
+                instance = await KoikatsuCharacterAssembler.BuildFromCardAsync(
                     card,
                     installation.AbdataRoot,
                     installation.ModsRoot,
@@ -88,13 +91,13 @@ namespace StudioEditor.ReferenceModels
                         $"'{KoikatsuCharacterAssembler.BaseBundleFileName}'.");
                 }
 
-                instance = KoikatsuCharacterAssembler.BuildFemaleBase(
+                instance = await KoikatsuCharacterAssembler.BuildFemaleBaseAsync(
                     Path.GetFullPath(filePath),
                     parent,
                     cancellationToken);
             }
 
-            return Task.FromResult<IReferenceModelInstance>(instance);
+            return instance;
         }
     }
 
@@ -127,12 +130,18 @@ namespace StudioEditor.ReferenceModels
                     filePath);
             }
 
+            StudioEditorDiskCache.Initialize();
             cancellationToken.ThrowIfCancellationRequested();
-            var scene = KoikatsuSceneReader.Read(filePath);
+            ReferenceModelLoadContext.Current?.Report(0.01f, "Reading scene card", Path.GetFileName(filePath));
+            var scene = await Task.Run(() => KoikatsuSceneReader.Read(filePath), cancellationToken);
             KoikatsuTimelineScene timeline = null;
             try
             {
-                KoikatsuTimelineSceneReader.TryRead(filePath, out timeline);
+                timeline = await Task.Run(() =>
+                {
+                    KoikatsuTimelineSceneReader.TryRead(filePath, out var parsed);
+                    return parsed;
+                }, cancellationToken);
             }
             catch (InvalidDataException exception)
             {
@@ -232,7 +241,7 @@ namespace StudioEditor.ReferenceModels
                     ResolveTimelineEyePattern);
             }
 
-            SetPhysicsEnabled(false);
+            SetPhysicsEnabled(true);
         }
 
         public string DisplayName { get; }

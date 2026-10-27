@@ -35,6 +35,8 @@ namespace StudioEditor.ReferenceModels
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            ReferenceModelLoadContext.Current?.Report(0.05f, "Reading model", Path.GetFileName(filePath));
+
             PMXModel model;
             var frameBudget = new UMTFrameBudget(4d);
             using (var stream = new FileStream(
@@ -48,6 +50,8 @@ namespace StudioEditor.ReferenceModels
 
             cancellationToken.ThrowIfCancellationRequested();
             UseOriginalNames(model);
+
+            ReferenceModelLoadContext.Current?.Report(0.35f, "Creating model", Path.GetFileName(filePath));
 
             var container = new GameObject(
                 Path.GetFileNameWithoutExtension(filePath) + " (Imported)");
@@ -73,6 +77,8 @@ namespace StudioEditor.ReferenceModels
                     model,
                     options);
                 cancellationToken.ThrowIfCancellationRequested();
+
+                ReferenceModelLoadContext.Current?.Report(0.95f, "Binding model", Path.GetFileName(filePath));
 
                 return new PmxReferenceModelInstance(result, container);
             }

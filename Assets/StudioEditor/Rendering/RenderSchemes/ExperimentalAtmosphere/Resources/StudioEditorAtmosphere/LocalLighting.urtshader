@@ -1,0 +1,148 @@
+#define UNIFIED_RT_ANYHIT_FUNC LocalCutoutHit
+#include "Packages/com.unity.render-pipelines.core/Runtime/UnifiedRayTracing/TraceRayAndQueryHit.hlsl"
+
+UNIFIED_RT_DECLARE_ACCEL_STRUCT(_LocalScene);
+struct Triangle { float4 a, b, c, uvAB, uvC, lightmapAB, lightmapC; };
+struct Instance { float4x4 localToWorld; float4 geometry, lightmapST; };
+struct Surface { float4 albedo, emission, textureST, data; };
+StructuredBuffer<Triangle> _LocalTriangles;
+StructuredBuffer<Instance> _LocalInstances;
+StructuredBuffer<Surface> _LocalMaterials;
+Texture2DArray<float4> _LocalAlbedo, _LocalEmission, _LocalBakedLightmaps, _LocalBakedDirections;
+SamplerState sampler_LocalAlbedo;
+RWTexture3D<float4> _LocalIrradianceOutput;
+RWTexture3D<float2> _LocalDistanceOutput;
+RWTexture3D<float> _LocalContactOutput;
+float4 _LocalTraceGrid, _LocalTraceOrigin, _LocalTraceSettings, _LocalSunDirection, _LocalSunColor;
+float4 _LocalSky0, _LocalSky1, _LocalSky2, _LocalSky3, _LocalSky4, _LocalSky5;
+int _LocalTraceMode;
+int _LocalContactRays;
+
+uint LocalCutoutHit(UnifiedRT::HitContext context, inout UnifiedRT::Hit payload)
+{
+    Instance instance = _LocalInstances[context.InstanceID()];
+    Triangle geometryTriangle = _LocalTriangles[(uint)instance.geometry.x + context.PrimitiveIndex()];
+    float2 bary = context.UvBarycentrics();
+    float2 uv = geometryTriangle.uvAB.xy * (1 - bary.x - bary.y) +
+        geometryTriangle.uvAB.zw * bary.x + geometryTriangle.uvC.xy * bary.y;
+    Surface material = _LocalMaterials[(uint)instance.geometry.z];
+    uv = uv * material.textureST.xy + material.textureST.zw;
+    float alpha = _LocalAlbedo.SampleLevel(sampler_LocalAlbedo, float3(frac(uv), material.data.x), 0).a * material.data.w;
+    return alpha >= material.data.z ? UnifiedRT::kAcceptHit : UnifiedRT::kIgnoreHit;
+}
+
+float3 Axis(uint axis)
+{
+    return axis == 0 ? float3(1,0,0) : axis == 1 ? float3(-1,0,0) :
+        axis == 2 ? float3(0,1,0) : axis == 3 ? float3(0,-1,0) :
+        axis == 4 ? float3(0,0,1) : float3(0,0,-1);
+}
+float3 Sky(float3 n)
+{
+    float3 sky = (n.x >= 0 ? _LocalSky0.rgb : _LocalSky1.rgb) * n.x * n.x +
+        (n.y >= 0 ? _LocalSky2.rgb : _LocalSky3.rgb) * n.y * n.y +
+        (n.z >= 0 ? _LocalSky4.rgb : _LocalSky5.rgb) * n.z * n.z;
+    return max(sky, 0);
+}
+UnifiedRT::Hit Trace(UnifiedRT::DispatchInfo info, float3 origin, float3 direction, float range)
+{
+    UnifiedRT::Ray ray;
+    ray.origin = origin; ray.direction = direction;
+    ray.tMin = _LocalTraceSettings.z; ray.tMax = range;
+    UnifiedRT::Hit hit = (UnifiedRT::Hit)0;
+    hit.instanceID = -1;
+    UnifiedRT::TraceRay(info, UNIFIED_RT_GET_ACCEL_STRUCT(_LocalScene), 255, ray, UnifiedRT::kRayFlagNone, hit);
+    return hit;
+}
+float3 Radiance(UnifiedRT::DispatchInfo info, UnifiedRT::Hit hit, float3 incoming)
+{
+    Instance instance = _LocalInstances[hit.instanceID];
+    Triangle geometryTriangle = _LocalTriangles[(uint)instance.geometry.x + hit.primitiveIndex];
+    float3 a = mul(instance.localToWorld, geometryTriangle.a).xyz;
+    float3 b = mul(instance.localToWorld, geometryTriangle.b).xyz;
+    float3 c = mul(instance.localToWorld, geometryTriangle.c).xyz;
+    float3 normal = normalize(cross(b - a, c - a));
+    if (dot(normal, incoming) > 0) normal = -normal;
+    float3 bary = float3(1 - hit.uvBarycentrics.x - hit.uvBarycentrics.y, hit.uvBarycentrics);
+    float3 position = a * bary.x + b * bary.y + c * bary.z;
+    float2 uv = geometryTriangle.uvAB.xy * bary.x + geometryTriangle.uvAB.zw * bary.y + geometryTriangle.uvC.xy * bary.z;
+    Surface material = _LocalMaterials[(uint)instance.geometry.z];
+    uv = uv * material.textureST.xy + material.textureST.zw;
+    float3 albedo = _LocalAlbedo.SampleLevel(sampler_LocalAlbedo, float3(frac(uv), material.data.x), 0).rgb * material.albedo.rgb;
+    float3 emission = _LocalEmission.SampleLevel(sampler_LocalAlbedo, float3(frac(uv), material.data.x), 0).rgb * material.emission.rgb;
+    albedo = clamp(albedo, 0, 0.9) * material.data.y;
+    if (instance.geometry.w >= 0)
+    {
+        float2 bakedUv = geometryTriangle.lightmapAB.xy * bary.x + geometryTriangle.lightmapAB.zw * bary.y +
+            geometryTriangle.lightmapC.xy * bary.z;
+        bakedUv = saturate(bakedUv * instance.lightmapST.xy + instance.lightmapST.zw);
+        float3 sampleUv = float3(bakedUv, instance.geometry.w);
+        float3 baked = _LocalBakedLightmaps.SampleLevel(sampler_LocalAlbedo, sampleUv, 0).rgb;
+        float4 direction = _LocalBakedDirections.SampleLevel(sampler_LocalAlbedo, sampleUv, 0);
+        baked *= (dot(normal, direction.xyz - .5) + .5) / max(direction.w, .0001);
+        // The lightmap stores incoming illumination. The hit surface's own
+        // masked emission is outgoing radiance, just as in the forward pass.
+        return albedo * max(baked, 0) + emission;
+    }
+    float ndotl = saturate(dot(normal, _LocalSunDirection.xyz));
+    float visible = 0;
+    if (ndotl > 0)
+        visible = Trace(info, position + normal * _LocalTraceSettings.z * 2,
+            _LocalSunDirection.xyz, 300).IsValid() ? 0 : 1;
+    // One diffuse bounce. Never sample the irradiance cache recursively.
+    return albedo * (_LocalSunColor.rgb * ndotl * visible + Sky(normal) * 0.15) + emission;
+}
+void RayGenExecute(UnifiedRT::DispatchInfo info)
+{
+    uint3 id = info.dispatchThreadID;
+    uint lobe = id.x / (uint)_LocalTraceGrid.x;
+    uint3 cell = uint3(id.x % (uint)_LocalTraceGrid.x, id.y, id.z);
+    float3 position = _LocalTraceOrigin.xyz + cell * _LocalTraceGrid.w;
+    float3 axis = Axis(lobe);
+    if (_LocalTraceMode == 1)
+    {
+        if (lobe == 6)
+        {
+            UnifiedRT::Hit hit = Trace(info, position, _LocalSunDirection.xyz, _LocalTraceSettings.y * 2 + _LocalTraceGrid.w * 2);
+            _LocalContactOutput[id] = hit.IsValid() ? hit.hitDistance : 1000;
+        }
+        else
+        {
+            float3 t = normalize(cross(abs(axis.y) < 0.9 ? float3(0,1,0) : float3(1,0,0), axis));
+            float3 b = cross(axis, t);
+            float visibility = 0;
+            for (int i = 0; i < _LocalContactRays; i++)
+            {
+                float u = (i + 0.5) / _LocalContactRays;
+                float phi = i * 2.39996323 + lobe * 0.73;
+                float3 rayDirection = t * sqrt(u) * cos(phi) + b * sqrt(u) * sin(phi) + axis * sqrt(1 - u);
+                UnifiedRT::Hit hit = Trace(info, position, rayDirection, _LocalTraceSettings.y);
+                visibility += hit.IsValid() ? saturate(hit.hitDistance / _LocalTraceSettings.y) : 1;
+            }
+            _LocalContactOutput[id] = visibility / _LocalContactRays;
+        }
+        return;
+    }
+    float3 tangent = normalize(cross(abs(axis.y) < 0.9 ? float3(0,1,0) : float3(1,0,0), axis));
+    float3 bitangent = cross(axis, tangent);
+    float3 energy = 0;
+    float mean = 0, second = 0, open = 0, back = 0;
+    uint samples = (uint)_LocalTraceSettings.w;
+    for (uint i = 0; i < samples; i++)
+    {
+        float u = (i + 0.5) / samples;
+        float phi = i * 2.39996323 + lobe * 0.73;
+        float3 direction = tangent * sqrt(u) * cos(phi) + bitangent * sqrt(u) * sin(phi) + axis * sqrt(1 - u);
+        UnifiedRT::Hit hit = Trace(info, position, direction, _LocalTraceSettings.x);
+        float distance = hit.IsValid() ? hit.hitDistance : _LocalTraceSettings.x;
+        mean += distance; second += distance * distance;
+        if (hit.IsValid())
+        {
+            energy += Radiance(info, hit, direction);
+            back += hit.isFrontFace ? 0 : 1;
+        }
+        else open += 1;
+    }
+    _LocalIrradianceOutput[id] = float4(energy / samples, back > samples * 0.6 ? -1 : open / samples);
+    _LocalDistanceOutput[id] = float2(mean, second) / samples;
+}

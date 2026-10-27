@@ -1,5 +1,39 @@
 # Studio Editor
 
+The `S` settings menu includes `Show Grid`. Turning it off hides the viewport's
+minor/major ground grid and ground X/Z axes immediately. The choice is saved
+between sessions; the corner orientation gizmo remains available.
+
+The scene rendering experiment also includes world-space one-bounce indirect
+lighting and geometry contact occlusion for characters and imported Lit surfaces.
+Its code switches and diagnostic views are documented in
+[ExperimentalAtmosphere/README.md](Rendering/RenderSchemes/ExperimentalAtmosphere/README.md).
+
+## Loading pipeline and disk cache
+
+Character imports, Studio scene imports, outfit changes, and character replacement
+run through `ReferenceModelLoadPipeline`. The load panel shows stage progress,
+scene object counts, and cancellation. File parsing and bundle preparation run on
+workers; Unity bundle/prefab loading uses async requests, and character parts are
+assembled between frame yields on the main thread. Map loading drains outstanding
+Unity operations before cancellation cleanup.
+
+The cache directory is `Library/StudioEditor/Cache` in the Unity Editor and
+`Application.persistentDataPath/StudioEditor/Cache` in a player. `Bundles` contains
+Unity 6 compatible copies, LZ4 conversions of LZMA bundles, and extracted compressed
+zipmod entries. `Lists` stores character/Studio list data; `Morphs` stores parsed
+face and eye control definitions; `Metadata` stores renderer groups and spring-bone
+definitions. Resource keys include installation-relative
+paths, source length/timestamp, and parser version, so moving the installation
+does not invalidate otherwise identical resources. Original game files are read-only.
+Metadata writes are atomic and checksummed; invalid metadata and rejected bundle
+copies are rebuilt. Deleting the cache while the application is closed forces a
+rebuild on the next import. Texture composition currently still runs per character.
+
+Imports log elapsed seconds and cache hit/miss counts. The first import prepares
+the needed resources; subsequent runs reuse disk data. Progress represents stages
+and completed objects, rather than bytes transferred.
+
 This folder contains the first minimal studio-editor foundation.
 
 Architecture planning for the new format-independent character runtime and optional
@@ -30,10 +64,10 @@ adapter checks the local editor setting first, then this table, and finally fall
 to finding the `UserData` ancestor of the imported card. Game AssetBundles remain
 read-only. Before Unity loads a legacy
 bundle, the adapter creates a source-fingerprinted compatibility copy under
-`Library/StudioEditor/KoikatsuBundles`. Only invalid legacy zero-count mip fields are
+`Library/StudioEditor/Cache/Bundles`. Only invalid legacy zero-count mip fields are
 normalized; valid single- and multi-level textures remain untouched. Modified bundles
-are cached with LZ4 compression so Unity 6 does not send invalid mip uploads to the
-graphics driver without expanding ordinary game bundles. A fingerprinted clean marker
+and LZMA-compressed bundles are cached with LZ4 compression so Unity 6 can load them
+without repeating decompression or sending invalid mip uploads to the graphics driver. A fingerprinted clean marker
 skips repeat inspection of bundles that need no changes. These cached bundles can also
 be used as the input for later
 resource export. The list catalog resolves card category/slot IDs to their `MainAB`,
@@ -75,6 +109,15 @@ migration rules (`Migrate`, `MigrateAll`, and `StripAll`) are applied to charact
 UAR references when the replacement manifest is active, matching Sideloader's card
 resolution behavior.
 
+## Koikatsu Studio attachment transforms
+
+Imported Studio attachments restore the saved local position and rotation under
+the character's accessory point or item's child root. Their saved scale is a world
+scale, matching `Studio.GuideObject`, and is compensated after the character pose.
+High-poly female hands also receive the original `(1, 0.9, 0.9)` size correction
+after animation sampling; this changes the attachment basis used by held props.
+Hand presets run before enabled finger FK groups so saved FK remains authoritative.
+
 ## Optional Final IK integration
 
 Final IK is not included in this repository. Without it, imported Studio character
@@ -112,6 +155,17 @@ binds `objectIndex` to Studio's dictionary-key-sorted object order and resolves 
 paths against the assembled hierarchy. Keyframe interpolation uses the curve stored
 on the source keyframe. Camera, visibility, face, material, light, constraint, and
 other plugin-owned value tracks remain visible as unsupported and are later stages.
+
+## URP Atmosphere Experiment
+
+Koikatsu scene masks, additive lens effects, sky cubemaps and clothes baking are
+covered by [the scene material compatibility notes](Adapters/Koikatsu/SceneMaterialCompatibility.md).
+Reimport an affected scene card to apply these conversions.
+
+The scene-level URP atmosphere experiment uses a code-only switch in
+`Rendering/RenderSchemes/ExperimentalAtmosphere/ExperimentalRenderConfiguration.cs`.
+See [the experiment documentation](Rendering/RenderSchemes/ExperimentalAtmosphere/README.md)
+for switching, volume quality, hardware ray shadows and current limits.
 
 ## Cascadeur Bridge
 

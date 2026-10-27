@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using MessagePack;
@@ -30,6 +32,10 @@ namespace StudioEditor.ReferenceModels
             studioModEntries =
                 new Dictionary<string, KoikatsuStudioListEntry>(
                     StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<int, (string Bundle, string Asset)> filterEntries = new();
+        private readonly Dictionary<string, (string Bundle, string Asset, KoikatsuZipmodArchive Archive)>
+            filterModEntries = new(StringComparer.OrdinalIgnoreCase);
+
         private readonly Dictionary<int, KoikatsuMapListEntry> mapEntries =
             new Dictionary<int, KoikatsuMapListEntry>();
         private readonly Dictionary<string, KoikatsuMapListEntry>
@@ -117,6 +123,65 @@ namespace StudioEditor.ReferenceModels
             return catalog;
         }
 
+        public static async Task<KoikatsuListCatalog> LoadAsync(
+            string abdataRoot, string modsRoot, CancellationToken token)
+        {
+            StudioEditorDiskCache.Initialize();
+            abdataRoot = Path.GetFullPath(abdataRoot);
+            modsRoot = string.IsNullOrWhiteSpace(modsRoot) ? string.Empty : Path.GetFullPath(modsRoot);
+            var cacheKey = abdataRoot + "\n" + modsRoot;
+            var fingerprint = await Task.Run(() => GetCacheFingerprint(abdataRoot), token);
+            if (cache.TryGetValue(cacheKey, out var cached) && cached.Fingerprint == fingerprint)
+                return cached.Catalog;
+            var directory = Path.Combine(abdataRoot, "list", "characustom");
+            if (!Directory.Exists(directory)) throw new DirectoryNotFoundException(directory);
+            var paths = Directory.GetFiles(directory, "*.unity3d");
+            Array.Sort(paths, StringComparer.OrdinalIgnoreCase);
+            var catalog = new KoikatsuListCatalog();
+            for (var index = 0; index < paths.Length; index++)
+            {
+                token.ThrowIfCancellationRequested();
+                var path = paths[index];
+                var key = "character-list-v1|" + DiskCacheStore.SourceFingerprint(path);
+                List<byte[]> data = await Task.Run(() =>
+                {
+                    if (!StudioEditorDiskCache.Store.TryRead("Lists", key, out var bytes)) return null;
+                    try { return MessagePackSerializer.Deserialize<List<byte[]>>(bytes); }
+                    catch (Exception) { return null; }
+                }, token);
+                ReferenceModelLoadContext.Current?.RecordCache(data != null);
+                if (data == null)
+                {
+                    using (var lease = await KoikatsuAssetBundleCache.AcquireAsync(new KoikatsuBundleSource(path), token))
+                    {
+                        var request = lease.Bundle.LoadAllAssetsAsync<TextAsset>();
+                        while (!request.isDone) await Task.Yield();
+                        token.ThrowIfCancellationRequested();
+                        data = request.allAssets.Cast<TextAsset>().Select(asset => asset.bytes).ToList();
+                    }
+                    var writeData = data;
+                    await Task.Run(() => StudioEditorDiskCache.Store.Write("Lists", key,
+                        MessagePackSerializer.Serialize(writeData), token), token);
+                }
+                var listData = data;
+                await Task.Run(() =>
+                {
+                    foreach (var bytes in listData)
+                        catalog.Add(MessagePackSerializer.Deserialize<KoikatsuChaListDataDto>(bytes));
+                }, token);
+                ReferenceModelLoadContext.Current?.Report((index + 1f) / (paths.Length + 2f),
+                    "Indexing resources", $"Character lists {index + 1}/{paths.Length}");
+                await ReferenceModelLoadContext.YieldAsync(token);
+            }
+            await Task.Run(() => catalog.LoadVanillaStudioLists(abdataRoot), token);
+            ReferenceModelLoadContext.Current?.Report((paths.Length + 1f) / (paths.Length + 2f),
+                "Indexing resources", "Studio lists");
+            await Task.Run(() => catalog.LoadSideloaderCache(abdataRoot, modsRoot), token);
+            token.ThrowIfCancellationRequested();
+            cache[cacheKey] = new CachedCatalog(catalog, fingerprint);
+            return catalog;
+        }
+
         private static string GetCacheFingerprint(string abdataRoot)
         {
             var gameRoot = Directory.GetParent(
@@ -124,16 +189,15 @@ namespace StudioEditor.ReferenceModels
             var cacheDirectory = string.IsNullOrEmpty(gameRoot)
                 ? string.Empty
                 : Path.Combine(gameRoot, "BepInEx", "cache");
-            if (!Directory.Exists(cacheDirectory))
+            var fingerprintFiles = new List<string>();
+            if (Directory.Exists(cacheDirectory))
+                fingerprintFiles.AddRange(Directory.GetFiles(cacheDirectory, "sideloader_zipmod_cache.bin.*"));
+            foreach (var relative in new[] { "list/characustom", "studio/info" })
             {
-                return string.Empty;
+                var directory = Path.Combine(abdataRoot, relative);
+                if (Directory.Exists(directory)) fingerprintFiles.AddRange(Directory.GetFiles(directory, "*.unity3d"));
             }
-
-            var parts = Directory.GetFiles(
-                    cacheDirectory,
-                    "sideloader_zipmod_cache.bin.*",
-                    SearchOption.TopDirectoryOnly)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
+            var parts = fingerprintFiles.OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
             return string.Join(
                 "|",
                 parts.Select(path =>
@@ -240,6 +304,12 @@ namespace StudioEditor.ReferenceModels
 
             entry = null;
             return false;
+        }
+
+        public IEnumerable<string> GetStudioBoneNames(int group)
+        {
+            foreach (var entry in boneEntries.Values)
+                if (entry.Group == group) yield return entry.BoneName;
         }
 
         public bool TryGetStudioBone(
@@ -354,6 +424,27 @@ namespace StudioEditor.ReferenceModels
                 out archivePath);
         }
 
+        public bool TryGetColorFilter(int id, out string bundle, out string asset)
+        {
+            if (filterEntries.TryGetValue(id, out var entry))
+            { bundle = entry.Bundle; asset = entry.Asset; return true; }
+            bundle = asset = null;
+            return false;
+        }
+
+        public bool TryGetColorFilter(int id, string guid, out string bundle, out string asset,
+            out KoikatsuZipmodArchive archive)
+        {
+            archive = null;
+            if (string.IsNullOrWhiteSpace(guid)) return TryGetColorFilter(id, out bundle, out asset);
+            if (filterModEntries.TryGetValue(guid + "\n" + id, out var entry))
+            {
+                bundle = entry.Bundle;asset = entry.Asset;archive = entry.Archive;return true;
+            }
+            bundle = asset = null;
+            return false;
+        }
+
         private void LoadVanillaStudioLists(string abdataRoot)
         {
             var directory = Path.Combine(abdataRoot, "studio", "info");
@@ -369,111 +460,77 @@ namespace StudioEditor.ReferenceModels
             Array.Sort(bundles, StringComparer.OrdinalIgnoreCase);
             for (var bundleIndex = 0; bundleIndex < bundles.Length; bundleIndex++)
             {
-                var manager = new AssetsManager();
+                ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var bundle = manager.LoadBundleFile(bundles[bundleIndex]);
-                    var assets = manager.LoadAssetsFileFromBundle(bundle, 0, false);
-                    var behaviours = assets.file.GetAssetsOfType(
-                        AssetClassID.MonoBehaviour);
-                    for (var index = 0; index < behaviours.Count; index++)
+                    var path = bundles[bundleIndex];
+                    var key = "studio-list-v2|" + DiskCacheStore.SourceFingerprint(path);
+                    Dictionary<string, List<List<string>>> lists = null;
+                    if (StudioEditorDiskCache.Store.TryRead("Lists", key, out var bytes))
                     {
-                        var field = manager.GetBaseField(
-                            assets,
-                            behaviours[index],
-                            AssetReadFlags.None);
-                        var name = field["m_Name"].AsString;
-                        var isItemList = !string.IsNullOrEmpty(name) &&
-                                         name.StartsWith(
-                                             "ItemList_",
-                                             StringComparison.OrdinalIgnoreCase);
-                        var isMapList = !string.IsNullOrEmpty(name) &&
-                                        name.StartsWith(
-                                            "Map_",
-                                            StringComparison.OrdinalIgnoreCase);
-                        var isBoneList = !string.IsNullOrEmpty(name) &&
-                                         name.StartsWith(
-                                             "Bone_",
-                                             StringComparison.OrdinalIgnoreCase);
-                        var isLightList = !string.IsNullOrEmpty(name) &&
-                                          name.StartsWith(
-                                              "Light_",
-                                              StringComparison.OrdinalIgnoreCase);
-                        var isAccessoryPointList = !string.IsNullOrEmpty(name) &&
-                                                   name.StartsWith(
-                                                       "AccessoryPoint_",
-                                                       StringComparison.OrdinalIgnoreCase);
-                        var isAnimationList = IsAnimationListName(name);
-                        var isHandList = TryParseHandList(name, out var hand);
-                        if (!isItemList && !isMapList && !isBoneList &&
-                            !isLightList && !isAccessoryPointList &&
-                            !isAnimationList && !isHandList)
+                        try { lists = MessagePackSerializer.Deserialize<Dictionary<string, List<List<string>>>>(bytes); }
+                        catch (Exception) { }
+                    }
+                    ReferenceModelLoadContext.Current?.RecordCache(lists != null);
+                    if (lists == null)
+                    {
+                        lists = ReadVanillaStudioLists(path);
+                        StudioEditorDiskCache.Store.Write("Lists", key, MessagePackSerializer.Serialize(lists),
+                            ReferenceModelLoadContext.Current?.CancellationToken ?? default);
+                    }
+                    foreach (var pair in lists)
+                    {
+                        var name = pair.Key;
+                        var isHand = TryParseHandList(name, out var hand);
+                        foreach (var values in pair.Value)
                         {
-                            continue;
-                        }
-
-                        var rows = GetArray(field["list"]);
-                        if (rows == null)
-                        {
-                            continue;
-                        }
-
-                        for (var rowIndex = 0; rowIndex < rows.Children.Count; rowIndex++)
-                        {
-                            var values = GetStringRow(rows.Children[rowIndex]);
-                            if (values == null)
-                            {
-                                continue;
-                            }
-
-                            if (isItemList)
-                            {
-                                AddStudioEntry(
-                                    values,
-                                    null,
-                                    string.Empty);
-                            }
-                            else if (isMapList)
-                            {
-                                AddMapEntry(
-                                    values,
-                                    null,
-                                    string.Empty);
-                            }
-                            else if (isBoneList)
-                            {
-                                AddBoneEntry(values);
-                            }
-                            else if (isLightList)
-                            {
-                                AddLightEntry(values);
-                            }
-                            else if (isAccessoryPointList)
-                            {
-                                AddAccessoryPointEntry(values);
-                            }
-                            else if (isHandList)
-                            {
-                                AddHandPoseEntry(hand, values);
-                            }
-                            else
-                            {
-                                AddAnimationEntry(values);
-                            }
+                            if (name.StartsWith("ItemList_", StringComparison.OrdinalIgnoreCase)) AddStudioEntry(values, null, string.Empty);
+                            else if (name.StartsWith("Map_", StringComparison.OrdinalIgnoreCase)) AddMapEntry(values, null, string.Empty);
+                            else if (name.StartsWith("Filter_", StringComparison.OrdinalIgnoreCase) && values.Count >= 4 && int.TryParse(values[0], out var filterId)) filterEntries[filterId] = (values[2], values[3]);
+                            else if (name.StartsWith("Bone_", StringComparison.OrdinalIgnoreCase)) AddBoneEntry(values);
+                            else if (name.StartsWith("Light_", StringComparison.OrdinalIgnoreCase)) AddLightEntry(values);
+                            else if (name.StartsWith("AccessoryPoint_", StringComparison.OrdinalIgnoreCase)) AddAccessoryPointEntry(values);
+                            else if (isHand) AddHandPoseEntry(hand, values);
+                            else if (IsAnimationListName(name)) AddAnimationEntry(values);
                         }
                     }
                 }
+                catch (OperationCanceledException) { throw; }
                 catch (Exception exception)
                 {
-                    Debug.LogWarning(
-                        "Could not read Koikatsu Studio item list " +
-                        $"'{bundles[bundleIndex]}': {exception.Message}");
-                }
-                finally
-                {
-                    manager.UnloadAll(true);
+                    Debug.LogWarning($"Could not read Koikatsu Studio item list '{bundles[bundleIndex]}': {exception.Message}");
                 }
             }
+        }
+
+        private static Dictionary<string, List<List<string>>> ReadVanillaStudioLists(string path)
+        {
+            var result = new Dictionary<string, List<List<string>>>();
+            var manager = new AssetsManager();
+            try
+            {
+                var bundle = manager.LoadBundleFile(path);
+                var assets = manager.LoadAssetsFileFromBundle(bundle, 0, false);
+                foreach (var info in assets.file.GetAssetsOfType(AssetClassID.MonoBehaviour))
+                {
+                    ReferenceModelLoadContext.Current?.CancellationToken.ThrowIfCancellationRequested();
+                    var field = manager.GetBaseField(assets, info, AssetReadFlags.None);
+                    var name = field["m_Name"].AsString;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    var rows = GetArray(field["list"]);
+                    if (rows == null) continue;
+                    var values = new List<List<string>>();
+                    foreach (var row in rows.Children)
+                    {
+                        var strings = GetStringRow(row);
+                        if (strings != null) values.Add(strings);
+                    }
+                    if (result.TryGetValue(name, out var previous)) previous.AddRange(values);
+                    else result.Add(name, values);
+                }
+                return result;
+            }
+            finally { manager.UnloadAll(true); }
         }
 
         private static AssetTypeValueField GetArray(AssetTypeValueField field)
@@ -990,7 +1047,8 @@ namespace StudioEditor.ReferenceModels
             var isMapList = data.FileNameWithoutExtension.StartsWith(
                 "Map_",
                 StringComparison.OrdinalIgnoreCase);
-            if (!isItemList && !isAnimationList && !isMapList)
+            var isFilterList = data.FileNameWithoutExtension.StartsWith("Filter_", StringComparison.OrdinalIgnoreCase);
+            if (!isItemList && !isAnimationList && !isMapList && !isFilterList)
             {
                 return;
             }
@@ -1012,6 +1070,14 @@ namespace StudioEditor.ReferenceModels
                         archive,
                         guid,
                         data.AssetBundleName);
+                }
+                else if (isFilterList)
+                {
+                    var values = data.Entries[index];
+                    if (values == null || values.Count < 4 || !int.TryParse(values[0], out int id)) continue;
+                    var bundle = string.IsNullOrWhiteSpace(values[2]) || values[2] == "0" ? data.AssetBundleName : values[2];
+                    if (!string.IsNullOrWhiteSpace(bundle) && !string.IsNullOrWhiteSpace(values[3]))
+                        filterModEntries.TryAdd(guid + "\n" + id, (bundle, values[3], archive));
                 }
                 else
                 {
@@ -1571,6 +1637,16 @@ namespace StudioEditor.ReferenceModels
         public KoikatsuZipmodArchive Archive { get; }
 
         public string ModGuid { get; }
+
+        public IEnumerable<string> BundlePaths => values.Values
+            .Where(value => !string.IsNullOrEmpty(value) && value.EndsWith(".unity3d", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        public IEnumerable<string> RuntimeBundlePaths => values
+            .Where(pair => !pair.Key.StartsWith("Thumb", StringComparison.OrdinalIgnoreCase))
+            .Select(pair => pair.Value)
+            .Where(value => !string.IsNullOrEmpty(value) && value.EndsWith(".unity3d", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
         public string Get(string key)
         {

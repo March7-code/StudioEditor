@@ -1,0 +1,11 @@
+#pragma kernel Reconstruct
+#include "Assets/StudioEditor/Rendering/RenderSchemes/ExperimentalAtmosphere/Resources/StudioEditorAtmosphere/FogVolumeCommon.hlsl"
+
+float4 _TestUVDepth[4];
+RWStructuredBuffer<float3> _TestWorld;
+
+[numthreads(4, 1, 1)]
+void Reconstruct(uint3 index : SV_DispatchThreadID)
+{
+    _TestWorld[index.x] = FogWorldPosition(_TestUVDepth[index.x].xy, _TestUVDepth[index.x].z);
+}

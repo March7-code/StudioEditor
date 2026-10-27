@@ -10,8 +10,6 @@ namespace StudioEditor.ReferenceModels
         private const int CheekCategory = 402;
         private const int LipLineCategory = 404;
         private const int MoleCategory = 415;
-        private const int EyeshadowCategory = 401;
-        private const int LipCategory = 403;
 
         public static Texture2D Bake(
             Material createMaterial,
@@ -29,10 +27,11 @@ namespace StudioEditor.ReferenceModels
                 return baseTexture;
             }
 
-            if (createMaterial.shader == null || !createMaterial.shader.isSupported)
+            var shader = Shader.Find("Hidden/StudioEditor/KoikatsuFaceBake");
+            if (shader == null || !shader.isSupported)
             {
                 Debug.LogWarning(
-                    "Koikatsu's original face creation shader is unavailable; " +
+                    "Koikatsu's face composition shader is unavailable; " +
                     "using the head texture unchanged.");
                 return baseTexture;
             }
@@ -47,10 +46,11 @@ namespace StudioEditor.ReferenceModels
                 makeup = card.Coordinates[coordinateIndex].Makeup;
             }
 
-            var material = new Material(createMaterial)
+            var material = new Material(shader)
             {
                 name = "Koikatsu Face Create (Runtime)",
             };
+            material.CopyPropertiesFromMaterial(createMaterial);
             try
             {
                 SetTexture(material, "_MainTex", baseTexture);
@@ -122,35 +122,11 @@ namespace StudioEditor.ReferenceModels
                         "MoleTex",
                         "ChaFileFace.moleId"));
                 SetColor(material, "_Color6", appearance.MoleColor);
-                SetVector(material, "_hokuro", appearance.MoleLayout);
-
-                SetTexture(
-                    material,
-                    "_overtex3",
-                    textureLoader.LoadCatalogTexture(
-                        EyeshadowCategory,
-                        makeup?.EyeshadowId ?? 0,
-                        "MainAB",
-                        "EyeshadowTex",
-                        "ChaFileFace.baseMakeup.eyeshadowId"));
-                SetColor(
-                    material,
-                    "_overcolor3",
-                    makeup?.EyeshadowColor ?? Color.white);
-
-                SetTexture(
-                    material,
-                    "_overtex1",
-                    textureLoader.LoadCatalogTexture(
-                        LipCategory,
-                        makeup?.LipId ?? 0,
-                        "MainAB",
-                        "LipTex",
-                        "ChaFileFace.baseMakeup.lipId"));
-                SetColor(
-                    material,
-                    "_overcolor1",
-                    makeup?.LipColor ?? Color.white);
+                var mole = appearance.MoleLayout;
+                SetVector(material, "_hokuro", new Vector4(
+                    Mathf.Lerp(0.25f, -0.25f, mole.x),
+                    Mathf.Lerp(0.3f, -0.3f, mole.y),
+                    0f, Mathf.Lerp(0f, 0.7f, mole.w)));
 
                 var texture = Render(
                     material,
@@ -261,11 +237,13 @@ namespace StudioEditor.ReferenceModels
                 height,
                 0,
                 RenderTextureFormat.ARGB32,
-                RenderTextureReadWrite.Default);
+                RenderTextureReadWrite.sRGB);
             var previous = RenderTexture.active;
+            var previousSrgbWrite = GL.sRGBWrite;
             Texture2D result = null;
             try
             {
+                GL.sRGBWrite = QualitySettings.activeColorSpace == ColorSpace.Linear;
                 Graphics.Blit(source, target, material, 0);
                 RenderTexture.active = target;
                 result = new Texture2D(
@@ -294,6 +272,7 @@ namespace StudioEditor.ReferenceModels
             finally
             {
                 RenderTexture.active = previous;
+                GL.sRGBWrite = previousSrgbWrite;
                 RenderTexture.ReleaseTemporary(target);
             }
         }

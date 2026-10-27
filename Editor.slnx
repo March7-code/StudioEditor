@@ -3,10 +3,15 @@
   <Project Path="Assembly-CSharp-firstpass.csproj" />
   <Project Path="Assembly-CSharp-Editor-firstpass.csproj" />
   <Project Path="StudioEditor.Characters.csproj" />
+  <Project Path="StudioEditor.RenderScheme.ExperimentalAtmosphere.Editor.csproj" />
   <Project Path="StudioEditor.Rendering.csproj" />
+  <Project Path="StudioEditor.RenderScheme.ExperimentalAtmosphere.csproj" />
   <Project Path="StudioEditor.Runtime.csproj" />
+  <Project Path="StudioEditor.Tests.Editor.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="StudioEditor.RenderScheme.ExperimentalAtmosphere.Tests.csproj" />
   <Project Path="StudioEditor.Adapter.Pmx.csproj" />
+  <Project Path="StudioEditor.Rendering.URP.csproj" />
   <Project Path="StudioEditor.Editor.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
   <Project Path="StudioEditor.RenderScheme.DefaultAnime.csproj" />

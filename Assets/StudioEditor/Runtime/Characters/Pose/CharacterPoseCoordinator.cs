@@ -6,6 +6,7 @@ namespace StudioEditor.Characters
 {
     public static class CharacterPoseStages
     {
+        public const int HandPoses = 50;
         public const int ImportedFk = 100;
         public const int ImportedIk = 200;
         public const int Timeline = 300;
@@ -14,6 +15,7 @@ namespace StudioEditor.Characters
         public const int ControlOverrides = 2500;
         public const int FullBodyIk = 2750;
         public const int EyeLook = 3000;
+        public const int JointCorrections = 4000;
     }
 
     public interface ICharacterPoseModifier

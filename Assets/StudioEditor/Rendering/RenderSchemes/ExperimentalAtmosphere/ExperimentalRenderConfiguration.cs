@@ -51,7 +51,8 @@ namespace StudioEditor.Rendering.Experimental
         public float ProbeSpacing = 0.6f;
         public Vector3Int ContactGrid = new Vector3Int(80, 40, 80);
         public float ContactSpacing = 0.1f;
-        public float AnchorDistance = 6f;
+        // The contact cache spans ±3.95 m; 6 m left close-up subjects outside it.
+        public float AnchorDistance = 2.5f;
         public LocalLightingDebugView DebugView = LocalLightingDebugView.None;
     }
 
@@ -72,7 +73,13 @@ namespace StudioEditor.Rendering.Experimental
         // Maps often bring their own sun while the editor's default light is still active.
         // Keep the designated RenderSettings.sun as the key light, reduce competing directionals.
         public float SecondaryDirectionalStrength = 0.2f;
-        public bool SceneReflectionProbe = true;
+        // Temporarily off: the cubemap is captured at the camera position and
+        // refreshed every few metres, so reflections pop with camera movement.
+        public bool SceneReflectionProbe = false;
+        // The face's hair shadow projects within this angle of the face front
+        // (degrees). Larger values follow side / overhead lights more literally
+        // and stretch bang shadows across the cheek; 180 uses the real direction.
+        public float HairShadowMaxAngle = 35f;
         public int ReflectionResolution = 128;
         public float ReflectionDistance = 80f;
         public bool ToneMapping = true;
@@ -84,7 +91,9 @@ namespace StudioEditor.Rendering.Experimental
     {
         public AtmosphereShadowMode Shadows = AtmosphereShadowMode.HardwareRayTracing;
         public AtmosphereQuality Quality = AtmosphereQuality.Balanced;
-        public float Density = 0.018f;
+        // Temporarily off: the camera-space composite grays characters when the
+        // camera faces the sun. Set a positive density (e.g. 0.018) to compare.
+        public float Density = 0f;
         public float MaxDistance = 60f;
         public float BaseHeight = 0f;
         public float HeightFalloff = 0.15f;

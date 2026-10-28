@@ -10,11 +10,17 @@ namespace StudioEditor.Rendering.Experimental
     /// <summary>Shared geometry for fog and local lighting, including sampled skinning.</summary>
     internal sealed class GeometryShadowWorld : IDisposable
     {
+        // Instance masks. Fog sun rays trace FogRayMask, local lighting traces LocalRayMask.
+        internal const uint FogMask = 1u, LocalCutoutMask = 2u, LocalOnlyMask = 4u, CharacterFogMask = 8u;
+        internal const uint FogRayMask = FogMask | CharacterFogMask;
+        internal const uint LocalRayMask = FogMask | LocalCutoutMask | LocalOnlyMask;
+
         internal sealed class Geometry
         {
             public Renderer Renderer;
             public Mesh Mesh;
             public bool OwnsMesh;
+            public bool Character;
             public readonly List<int> Handles = new List<int>();
             public readonly List<uint> Masks = new List<uint>();
         }
@@ -151,6 +157,10 @@ namespace StudioEditor.Rendering.Experimental
                     material.HasProperty("_AlphaClip") && material.GetFloat("_AlphaClip") > 0.5f);
         }
 
+        // Instance IDs index RaySurfaceGeometry slots; both must accept the same submeshes.
+        internal bool AcceptsSlot(Geometry item, Material material) =>
+            AcceptsSurface(material) && (!item.Character || IsOpaqueCaster(material));
+
         private static bool IsLocalSurface(Renderer renderer)
         {
             foreach (var material in renderer.sharedMaterials)
@@ -158,8 +168,16 @@ namespace StudioEditor.Rendering.Experimental
                 if (material == null || material.shader == null) continue;
                 string name = material.shader.name;
                 if (name == "Universal Render Pipeline/Lit" || name == "StudioEditor/ExperimentalLocalLit" ||
-                    name == "StudioEditor/AnimeCharacter" || name == "StudioEditor/KoikatsuStudioItem") return true;
+                    name == "StudioEditor/KoikatsuStudioItem") return true;
             }
+            return false;
+        }
+
+        internal static bool IsCharacter(Renderer renderer)
+        {
+            if (renderer.GetComponentInParent<CharacterShadowBinding>() != null) return true;
+            foreach (var material in renderer.sharedMaterials)
+                if (material != null && material.shader != null && material.shader.name == "StudioEditor/AnimeCharacter") return true;
             return false;
         }
 
@@ -186,11 +204,15 @@ namespace StudioEditor.Rendering.Experimental
                     Mesh source = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh :
                         renderer.GetComponent<MeshFilter>()?.sharedMesh;
                     if (source == null || source.vertexCount == 0) continue;
+                    bool character = IsCharacter(renderer);
+                    if (character && renderer.shadowCastingMode == ShadowCastingMode.Off) continue;
                     var materials = renderer.sharedMaterials;
                     bool hasOpaqueSlot = false;
                     for (int sub = 0; sub < source.subMeshCount; sub++)
                     {
-                        if (source.GetTopology(sub) == MeshTopology.Triangles && sub < materials.Length && AcceptsSurface(materials[sub])) hasOpaqueSlot = true;
+                        var material = sub < materials.Length ? materials[sub] : null;
+                        if (source.GetTopology(sub) == MeshTopology.Triangles && AcceptsSurface(material) &&
+                            (!character || IsOpaqueCaster(material))) hasOpaqueSlot = true;
                         else OmittedCutoutSlots++;
                     }
                     if (!hasOpaqueSlot) continue;
@@ -204,6 +226,7 @@ namespace StudioEditor.Rendering.Experimental
                         }
                     }
                     existing.Remove(renderer.GetEntityId());
+                    item.Character = character;
                     geometry.Add(item);
                     item.Handles.Clear();
                     item.Masks.Clear();
@@ -213,10 +236,13 @@ namespace StudioEditor.Rendering.Experimental
                     for (int sub = 0; sub < item.Mesh.subMeshCount; sub++)
                     {
                         var material = sub < materials.Length ? materials[sub] : null;
-                        if (item.Mesh.GetTopology(sub) != MeshTopology.Triangles || !AcceptsSurface(material)) continue;
+                        if (item.Mesh.GetTopology(sub) != MeshTopology.Triangles || !AcceptsSlot(item, material)) continue;
                         bool opaque = IsOpaqueCaster(material);
-                        // 1: original fog casters, 2: alpha-tested local geometry, 4: local-only non-casters.
-                        uint mask = !opaque ? 2u : renderer.shadowCastingMode == ShadowCastingMode.Off ? 4u : 1u;
+                        bool casts = renderer.shadowCastingMode != ShadowCastingMode.Off;
+                        // Characters keep their toon self shading and shadow maps. A shared
+                        // world cache cannot tell a character from its own geometry, so they
+                        // only occlude the fog's sun rays and never enter local lighting.
+                        uint mask = character ? CharacterFogMask : !opaque ? LocalCutoutMask : !casts ? LocalOnlyMask : FogMask;
                         var desc = new MeshInstanceDesc(item.Mesh, sub)
                         {
                             instanceID = (uint)InstanceCount,

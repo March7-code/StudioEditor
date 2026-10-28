@@ -51,7 +51,8 @@ UnifiedRT::Hit Trace(UnifiedRT::DispatchInfo info, float3 origin, float3 directi
     ray.tMin = _LocalTraceSettings.z; ray.tMax = range;
     UnifiedRT::Hit hit = (UnifiedRT::Hit)0;
     hit.instanceID = -1;
-    UnifiedRT::TraceRay(info, UNIFIED_RT_GET_ACCEL_STRUCT(_LocalScene), 255, ray, UnifiedRT::kRayFlagNone, hit);
+    // GeometryShadowWorld.LocalRayMask: world geometry only, never characters.
+    UnifiedRT::TraceRay(info, UNIFIED_RT_GET_ACCEL_STRUCT(_LocalScene), 7, ray, UnifiedRT::kRayFlagNone, hit);
     return hit;
 }
 float3 Radiance(UnifiedRT::DispatchInfo info, UnifiedRT::Hit hit, float3 incoming)

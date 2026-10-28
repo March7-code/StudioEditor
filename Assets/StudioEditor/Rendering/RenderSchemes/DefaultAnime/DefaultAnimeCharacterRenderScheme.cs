@@ -290,6 +290,16 @@ namespace StudioEditor.Rendering.RenderSchemes
                 material.EnableKeyword("_NORMALMAP");
             }
 
+            // Legacy Unity DXT5 normals store X in alpha even when red is not
+            // one. URP's combined RG/AG decoder would multiply those channels.
+            // Classify each map separately so BC5 and built-in defaults retain
+            // the platform decoder, including mixed base/detail encodings.
+            SetVector(material, "_SourceNormalEncoding", new Vector4(
+                UsesLegacyAgNormal(normalMap) ? 1f : 0f,
+                UsesLegacyAgNormal(material.GetTexture("_NormalMapDetail")) ? 1f : 0f,
+                0f,
+                0f));
+
             var styleMask = FindTexture(
                 context.SourceMaterial,
                 "_LightMap",
@@ -399,6 +409,13 @@ namespace StudioEditor.Rendering.RenderSchemes
 
                 SetColor(material, "_EmissionColor", emissionColor.Value);
             }
+        }
+
+        private static bool UsesLegacyAgNormal(Texture texture)
+        {
+            return texture is Texture2D normal &&
+                   (normal.format == TextureFormat.DXT5 ||
+                    normal.format == TextureFormat.DXT5Crunched);
         }
 
         private static bool IsFaceDetail(string materialKey)

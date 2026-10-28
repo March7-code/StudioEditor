@@ -39,12 +39,20 @@ half3 SourceLineBlend(half3 c, half alpha)
     return saturate(alpha > .5h ? 1 - (1 - c) * (2 - 2 * alpha) : c * (2 * alpha));
 }
 
+half3 SourceUnpackNormal(half4 packedNormal, half legacyAg)
+{
+    // The game's DXT5 normals use AG directly; their unused red channel is
+    // often .5 rather than 1. Multiplying A by R tilts even a flat normal.
+    // Keep URP decoding for BC5, platform defaults and other texture formats.
+    return legacyAg > .5h ? UnpackNormalAG(packedNormal) : UnpackNormal(packedNormal);
+}
+
 half3 SourceBodyNormal(Varyings input, half3 geometricNormal, half3x3 tangentToWorld)
 {
-    half3 baseNormal = UnpackNormal(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap,
-        input.rawUV * _NormalMap_ST.xy + _NormalMap_ST.zw));
-    half3 detailNormal = UnpackNormal(SAMPLE_TEXTURE2D(_NormalMapDetail, sampler_NormalMap,
-        input.rawUV * _NormalMapDetail_ST.xy + _NormalMapDetail_ST.zw));
+    half3 baseNormal = SourceUnpackNormal(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap,
+        input.rawUV * _NormalMap_ST.xy + _NormalMap_ST.zw), _SourceNormalEncoding.x);
+    half3 detailNormal = SourceUnpackNormal(SAMPLE_TEXTURE2D(_NormalMapDetail, sampler_NormalMap,
+        input.rawUV * _NormalMapDetail_ST.xy + _NormalMapDetail_ST.zw), _SourceNormalEncoding.y);
     // Reoriented normal mapping, then the source detail-strength interpolation.
     half3 t = baseNormal + half3(0, 0, 1);
     half3 u = detailNormal * half3(-1, -1, 1);
@@ -64,6 +72,13 @@ half SourceFaceCurveRamp(Varyings input, Light light, half originalRamp, out hal
     // This map describes azimuth. Near-vertical lights keep the source's
     // elevation response instead of inventing a horizontal shadow direction.
     float threshold = acos(clamp(localLight.y / max(horizontal, 1e-5), -1, 1)) / PI;
+    // Azimuth alone treats a high side light as a horizon light and splits the
+    // face down the nose. A raised light illuminates more of the face: scale the
+    // side-light threshold by the light's horizontal share, keeping 0 (front)
+    // and 1 (behind) fixed. Lights below the head keep the azimuth boundary.
+    float3 headUp = cross(_FaceShadowForward.xyz, _FaceShadowRight.xyz);
+    if (dot(light.direction, headUp) > 0)
+        threshold -= (1 - horizontal) * min(threshold, 1 - threshold);
     // Both textures use linear/clamp sampling. Share the source ramp sampler
     // so the additional-light + shadow variants stay within the D3D limit.
     float2 faceUV = input.faceShadowUV.xy;
@@ -82,6 +97,24 @@ half SourceFaceCurveRamp(Varyings input, Light light, half originalRamp, out hal
     half strength = saturate(_FaceShadowStrength) * smoothstep(.05, .2, horizontal);
     curveShadow = (1 - visible) * strength;
     return lerp(originalRamp, curveRamp, strength);
+}
+
+// World size of one shadow texel at a receiver, for orthographic or perspective maps.
+float SourceShadowTexelWorld(float4x4 worldToShadow, float3 positionWS, float invAtlasSize)
+{
+    float4 projected = mul(worldToShadow, float4(positionWS, 1));
+    float w = max(projected.w, 1e-5);
+    float3 gradient = (worldToShadow[0].xyz - projected.x / w * worldToShadow[3].xyz) / w;
+    return invAtlasSize / max(length(gradient), 1e-5);
+}
+
+// The re-sharpened comparisons below have no wide PCF to hide self-shadowing
+// acne on curved skin and cloth. Offset the receiver by its own map's texel
+// footprint, more at grazing angles, so the bias stays proportional across cascades.
+float3 SourceShadowReceiver(float3 positionWS, half3 normalWS, half3 lightDirection, float texelWorld)
+{
+    half grazing = 1 - saturate(dot(normalWS, lightDirection));
+    return positionWS + normalWS * (texelWorld * (1 + grazing)) + lightDirection * (texelWorld * .5);
 }
 
 half SourceCharacterDepthAt(int2 pixel, int index, bool clothes)
@@ -143,8 +176,10 @@ half SourceClothesSkinVisibility(Varyings input, Light light)
         float4 encoded = _ClothesSkinLightPositions[index];
         float3 direction = encoded.w > .5 ? normalize(encoded.xyz - input.positionWS) : encoded.xyz;
         if (dot(direction, light.direction) < .9999) continue;
-        float4 projected = mul(_ClothesSkinWorldToShadow[index],
-            float4(input.positionWS + light.direction * .001, 1));
+        // The own body is among the casters, so the receiver needs a texel-scale bias.
+        float3 receiver = SourceShadowReceiver(input.positionWS, normalize(input.normalWS), light.direction,
+            SourceShadowTexelWorld(_ClothesSkinWorldToShadow[index], input.positionWS, 1.0 / 1024));
+        float4 projected = mul(_ClothesSkinWorldToShadow[index], float4(receiver, 1));
         if (projected.w <= 0) return 1;
         float3 shadow = projected.xyz / projected.w;
         if (any(shadow < 0) || any(shadow > 1)) return 1;
@@ -191,29 +226,55 @@ Light SourceFaceSceneLight(Varyings input, Light light)
     return light;
 }
 
+// Body skin (3) and clothes (1) take the toon ramp's binary boundary from the
+// shadow map, so both need its hard edge. Face uses the SDF, hair its own map.
 bool SourceBodyHardShadows()
 {
-    return _StudioSurfaceLighting.x > .5h && _SourceCharacterShading > .5h && _SourceCharacterModel == 3;
+    return _StudioSurfaceLighting.x > .5h && _SourceCharacterShading > .5h &&
+        (_SourceCharacterModel == 3 || _SourceCharacterModel == 1);
 }
 
-half SourceBodyMainShadow(float3 positionWS, half fallback)
+// A single comparison snaps the edge to the shadow texel grid, which reads as
+// torn, stair-stepped blocks on curved cloth. A 5x5 tent locates the edge with
+// sub-texel precision; thresholding it at its midpoint keeps the edge where the
+// caster is and restores a toon-hard boundary. URP's wide 7x7 soft filter is not
+// used: thresholding that shifts corners and erases narrow shadows.
+half SourceHardShadowCoverage(TEXTURE2D_SHADOW_PARAM(shadowMap, shadowSampler), float3 coord, float4 mapSize)
 {
-    // Select the native shadow atlas's single comparison footprint for body
-    // skin. Do not threshold an already blurred PCF result or change the light,
-    // which would also change the face, hair, garments and room.
+    float weights[9];
+    float2 uvs[9];
+    SampleShadow_ComputeSamples_Tent_Filter_5x5(float, mapSize, coord, weights, uvs);
+    half coverage = 0;
+    [unroll] for (int i = 0; i < 9; i++)
+        coverage += weights[i] * SAMPLE_TEXTURE2D_SHADOW(shadowMap, shadowSampler, float3(uvs[i], coord.z));
+    // About half a texel of antialiasing; derivatives are unsafe in the light loop.
+    return smoothstep(.35h, .65h, coverage);
+}
+
+half SourceBodyMainShadow(float3 positionWS, half3 normalWS, half3 lightDirection, half fallback)
+{
+    // Body skin and clothes only. Do not change the light itself, which would
+    // also change the face, hair and room.
     #if defined(MAIN_LIGHT_CALCULATE_SHADOWS) && !defined(_MAIN_LIGHT_SHADOWS_SCREEN)
     if (SourceBodyHardShadows())
     {
-        float4 shadow = TransformWorldToShadowCoord(positionWS);
+        #ifdef _MAIN_LIGHT_SHADOWS_CASCADE
+        half cascade = ComputeCascadeIndex(positionWS);
+        #else
+        half cascade = 0;
+        #endif
+        float texel = SourceShadowTexelWorld(_MainLightWorldToShadow[cascade], positionWS, _MainLightShadowmapSize.x);
+        float4 shadow = TransformWorldToShadowCoord(SourceShadowReceiver(positionWS, normalWS, lightDirection, texel));
         if (BEYOND_SHADOW_FAR(shadow)) return 1;
-        half coverage = SAMPLE_TEXTURE2D_SHADOW(_MainLightShadowmapTexture, sampler_LinearClampCompare, shadow.xyz);
+        half coverage = SourceHardShadowCoverage(TEXTURE2D_SHADOW_ARGS(_MainLightShadowmapTexture,
+            sampler_LinearClampCompare), shadow.xyz, _MainLightShadowmapSize);
         return LerpWhiteTo(coverage, GetMainLightShadowParams().x);
     }
     #endif
     return fallback;
 }
 
-half SourceBodyAdditionalShadow(uint index, float3 positionWS, Light light)
+half SourceBodyAdditionalShadow(uint index, float3 positionWS, half3 normalWS, Light light)
 {
     #if defined(ADDITIONAL_LIGHT_CALCULATE_SHADOWS)
     if (SourceBodyHardShadows())
@@ -228,13 +289,16 @@ half SourceBodyAdditionalShadow(uint index, float3 positionWS, Light light)
         if (slice < 0) return 1;
         if (parameters.z > .5h) slice += CubeMapFaceID(-light.direction);
         #if USE_STRUCTURED_BUFFER_FOR_LIGHT_DATA
-        float4 shadow = mul(_AdditionalLightsWorldToShadow_SSBO[slice], float4(positionWS, 1));
+        float4x4 worldToShadow = _AdditionalLightsWorldToShadow_SSBO[slice];
         #else
-        float4 shadow = mul(_AdditionalLightsWorldToShadow[slice], float4(positionWS, 1));
+        float4x4 worldToShadow = _AdditionalLightsWorldToShadow[slice];
         #endif
+        float texel = SourceShadowTexelWorld(worldToShadow, positionWS, _AdditionalShadowmapSize.x);
+        float4 shadow = mul(worldToShadow, float4(SourceShadowReceiver(positionWS, normalWS, light.direction, texel), 1));
         shadow.xyz /= shadow.w;
         if (BEYOND_SHADOW_FAR(shadow)) return 1;
-        half coverage = SAMPLE_TEXTURE2D_SHADOW(_AdditionalLightsShadowmapTexture, sampler_LinearClampCompare, shadow.xyz);
+        half coverage = SourceHardShadowCoverage(TEXTURE2D_SHADOW_ARGS(_AdditionalLightsShadowmapTexture,
+            sampler_LinearClampCompare), shadow.xyz, _AdditionalShadowmapSize);
         // The source character path supplies a white baked shadow mask.
         return lerp(LerpWhiteTo(coverage, parameters.x), 1, GetAdditionalLightShadowFade(positionWS));
     }
@@ -270,12 +334,16 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
     half3 hsv = SourceRgbToHsv(albedo * (body ? 1.0h : _SourceShadowColor.rgb));
     half3 shadowChroma = SourceHsvToRgb(half3(hsv.x, hsv.y * (body ? .66h : .5h), 1));
     half3 shadow = SourceOverlay(shadowChroma * .9h, ambient);
-    // The source ambient overlay can lift the body's dark endpoint almost to
-    // white, hiding even a binary ramp under a broad illumination gradient.
-    // Use the imported skin shadow palette in the experiment, as the face does,
-    // while keeping the source ramp, detail masks and actual room illumination.
-    if (_StudioSurfaceLighting.x > .5h && _SourceCharacterModel == 3)
-        shadow = min(shadow, _ShadowColor.rgb);
+    // The source ambient overlay can lift the dark endpoint almost to white,
+    // hiding even a binary ramp on pale skin or clothes. Both use the same
+    // palette limit in the experiment. Clothes retain their source material's
+    // shadow tint instead of borrowing the skin palette or the generic fallback.
+    if (_StudioSurfaceLighting.x > .5h &&
+        (_SourceCharacterModel == 3 || _SourceCharacterModel == 1))
+    {
+        half3 palette = body ? _ShadowColor.rgb : saturate(_SourceShadowColor.rgb);
+        shadow = min(shadow, palette);
+    }
     half lineBlue = body ? lineMask.b * _DetailNormalMapScale : lineMask.b;
     half extend = 1 - 1.2h * _SourceShadowExtend * (1 - min(1 - lineBlue, 1 - detail.g));
     if (!body)
@@ -317,12 +385,18 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
         lit = albedo * (1 + highlight * (2 * shadow - 2)) + texturedSpecular * _SourceSpecularColor.rgb;
         nonTextureLit = albedo + analyticSpecular * (1 - detail.r) * _SourceSpecularColor.rgb;
     }
+    #if STUDIO_CHARACTER_DEBUG == 7
+    lit = albedo; nonTextureLit = albedo;
+    #endif
     lit = saturate(lerp(lit, nonTextureLit, _SourceNotUseTextureSpecular));
     half3 color = lerp(lit * shadow, lit, weight);
     if (!body)
     {
         half rim = clamp(pow(1 - noV, 1 + 9 * _SourceRimPower) *
             ((1 - detail.b) * (25.0h / 9) - (16.0h / 9)), 0, .6h);
+        #if STUDIO_CHARACTER_DEBUG == 7
+        rim = 0;
+        #endif
         color = saturate(color + rim * _SourceSpecularColor.rgb * _SourceRimStrength * (1 - detail.g));
     }
     half3 direct = .4h + .6h * light.color;

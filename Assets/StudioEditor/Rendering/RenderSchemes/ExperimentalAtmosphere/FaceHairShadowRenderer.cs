@@ -101,7 +101,8 @@ namespace StudioEditor.Rendering.Experimental
                 for (int index = 0; index < selected.Length; index++)
                 {
                     var light = selected[index];
-                    CreateProjection(bounds, light, binding.HeadFrame.up, out var clip, out var texture);
+                    CreateProjection(bounds, light, binding.HeadFrame.up, out var clip, out var texture,
+                        binding.HeadFrame.forward, ExperimentalRenderConfiguration.Surfaces.HairShadowMaxAngle);
                     face.Matrices[index] = texture;
                     Vector3 position = light.type == LightType.Directional ? -light.transform.forward : light.transform.position;
                     face.Lights[index] = new Vector4(position.x, position.y, position.z, light.type == LightType.Directional ? 0 : 1);
@@ -238,13 +239,26 @@ namespace StudioEditor.Rendering.Experimental
         private static float LightScore(Light light, Vector3 center) => light.intensity * light.color.maxColorComponent /
             (light.type == LightType.Directional ? 1 : Mathf.Max(.05f, (light.transform.position - center).sqrMagnitude));
 
+        // A light's own direction stretches bang silhouettes across the curved face
+        // as it moves to the side or overhead. With headForward, the projection
+        // direction stays within maxAngle of the face front, keeping the frontal
+        // shape and still moving toward the light. The receiver still matches the
+        // real light by its encoded position, and its toon band uses the real light.
         internal static void CreateProjection(Bounds bounds, Light light, Vector3 headUp,
-            out Matrix4x4 clip, out Matrix4x4 texture)
+            out Matrix4x4 clip, out Matrix4x4 texture, Vector3? headForward = null, float maxAngle = 180)
         {
             float radius = Mathf.Max(.06f, bounds.extents.magnitude + .015f);
             bool directional = light.type == LightType.Directional;
             Vector3 direction = directional ? -light.transform.forward : (light.transform.position - bounds.center).normalized;
-            Vector3 eye = directional ? bounds.center + direction * (radius + .5f) : light.transform.position;
+            float lightDistance = directional ? 0 : Vector3.Distance(light.transform.position, bounds.center);
+            if (headForward.HasValue && maxAngle < 180)
+            {
+                var forward = headForward.Value.normalized;
+                float angle = Vector3.Angle(forward, direction);
+                if (angle > maxAngle)
+                    direction = Vector3.RotateTowards(forward, direction, maxAngle * Mathf.Deg2Rad, 0).normalized;
+            }
+            Vector3 eye = directional ? bounds.center + direction * (radius + .5f) : bounds.center + direction * lightDistance;
             Vector3 up = Mathf.Abs(Vector3.Dot(direction, headUp)) < .95f ? headUp :
                 Mathf.Abs(direction.y) < .95f ? Vector3.up : Vector3.right;
             var view = Matrix4x4.Scale(new Vector3(1, 1, -1)) *

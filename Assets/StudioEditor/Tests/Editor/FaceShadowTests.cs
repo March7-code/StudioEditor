@@ -38,8 +38,9 @@ namespace StudioEditor.Tests
                 Assert.That(mesh.uv3,Is.Empty);Assert.That(copy.uv3.Length,Is.EqualTo(4));
                 var data = new List<Vector2>();copy.GetUVs(2,data);
                 Assert.That(copy.GetVertexAttributeDimension(VertexAttribute.TexCoord2),Is.EqualTo(2));
-                Assert.That(data[0].x,Is.EqualTo(.07f).Within(.0001f));
-                Assert.That(data[2].x,Is.EqualTo(.93f).Within(.0001f));
+                // UV3.x is relative to the fitted outer contour, which ends at the chin.
+                Assert.That(data[0].x,Is.EqualTo(0).Within(.0001f));
+                Assert.That(data[2].x,Is.EqualTo(1).Within(.0001f));
                 Assert.That(data[0].y,Is.Zero);Assert.That(data[2].y,Is.EqualTo(1));
                 Assert.That(copy.blendShapeCount,Is.EqualTo(1));Assert.That(copy.boneWeights,Is.EqualTo(mesh.boneWeights));
                 var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);

@@ -115,5 +115,28 @@ namespace StudioEditor.Tests
                 RenderTexture.ReleaseTemporary(target);foreach(var item in owned)Object.DestroyImmediate(item);
             }
         }
+
+        // The source front-hair shader blends with ZWrite On and its materials
+        // draw at queue 2850. Losing either lets overlapping strands composite
+        // in triangle order, which reads as bright patches from some angles.
+        [Test]
+        public void FrontHairKeepsSourceQueueAndDepthWrite()
+        {
+            string bundle = "D:/koikatsu/Koikatu/abdata/chara/bo_hair_f_00.unity3d";
+            if (!File.Exists(bundle)) Assert.Ignore("Local source game assets are unavailable.");
+            using var lease = KoikatsuAssetBundleCache.Acquire(bundle);
+            var source = lease.Bundle.LoadAsset<GameObject>("p_cf_hair_f_04").GetComponentsInChildren<Renderer>(true)
+                .SelectMany(r=>r.sharedMaterials).First(m=>m != null && m.shader.name == "Shader Forge/main_hair_front");
+            Assert.That(source.renderQueue,Is.EqualTo(2850));
+            var converted = new DefaultAnimeCharacterRenderScheme().CreateMaterial(new CharacterRenderMaterialContext(
+                source,CharacterRenderSurfaceRole.Hair,"hair","front hair render state",Color.white,null));
+            try
+            {
+                Assert.That(converted.renderQueue,Is.EqualTo(source.renderQueue));
+                Assert.That(converted.GetFloat("_Surface"),Is.EqualTo(1));
+                Assert.That(converted.GetFloat("_ZWrite"),Is.EqualTo(1),"Source FORWARD pass writes depth while blending.");
+            }
+            finally {Object.DestroyImmediate(converted);}
+        }
     }
 }

@@ -754,6 +754,31 @@ namespace StudioEditor.ReferenceModels
             public string Value { get; set; }
         }
 
+        // MaterialEditorCharaController.RendererProperty. Property is
+        // MaterialAPI.RendererProperties: 0 Enabled, 1 ShadowCastingMode,
+        // 2 ReceiveShadows, 3 RecalculateNormals, 4 UpdateWhenOffscreen.
+        [MessagePackObject]
+        public sealed class RendererPropertyDto
+        {
+            [Key("ObjectType")]
+            public int ObjectType { get; set; }
+
+            [Key("CoordinateIndex")]
+            public int CoordinateIndex { get; set; }
+
+            [Key("Slot")]
+            public int Slot { get; set; }
+
+            [Key("RendererName")]
+            public string RendererName { get; set; }
+
+            [Key("Property")]
+            public int Property { get; set; }
+
+            [Key("Value")]
+            public string Value { get; set; }
+        }
+
         [MessagePackObject]
         public sealed class MaterialTexturePropertyDto
         {

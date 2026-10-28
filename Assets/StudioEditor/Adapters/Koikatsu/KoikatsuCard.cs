@@ -816,6 +816,8 @@ namespace StudioEditor.ReferenceModels
             floatProperties;
         private readonly IReadOnlyList<KoikatsuCardReader.MaterialTexturePropertyDto>
             textureProperties;
+        private readonly IReadOnlyList<KoikatsuCardReader.RendererPropertyDto>
+            rendererProperties;
 
         private KoikatsuMaterialEditorData(
             IReadOnlyDictionary<int, byte[]> textures,
@@ -824,12 +826,15 @@ namespace StudioEditor.ReferenceModels
             IReadOnlyList<KoikatsuCardReader.MaterialFloatPropertyDto>
                 floatProperties,
             IReadOnlyList<KoikatsuCardReader.MaterialTexturePropertyDto>
-                textureProperties)
+                textureProperties,
+            IReadOnlyList<KoikatsuCardReader.RendererPropertyDto>
+                rendererProperties)
         {
             this.textures = textures;
             this.colorProperties = colorProperties;
             this.floatProperties = floatProperties;
             this.textureProperties = textureProperties;
+            this.rendererProperties = rendererProperties;
         }
 
         public static KoikatsuMaterialEditorData Read(
@@ -897,11 +902,17 @@ namespace StudioEditor.ReferenceModels
                                      "MaterialTexturePropertyList") ??
                                  new List<KoikatsuCardReader.
                                      MaterialTexturePropertyDto>();
+                var rendererProperties = ReadValue<List<
+                                             KoikatsuCardReader.RendererPropertyDto>>(
+                                         plugin.Data,
+                                         "RendererPropertyList") ??
+                                     new List<KoikatsuCardReader.RendererPropertyDto>();
                 return new KoikatsuMaterialEditorData(
                     textures,
                     colorProperties,
                     floatProperties,
-                    textureProperties);
+                    textureProperties,
+                    rendererProperties);
             }
             catch (Exception exception)
             {
@@ -991,6 +1002,42 @@ namespace StudioEditor.ReferenceModels
                 yield return property;
             }
         }
+
+        // MaterialEditorCharaController.LoadData applies these to the part's
+        // renderers by MaterialAPI.NameFormatted() name. Clothing and accessory
+        // entries apply only to the current coordinate; hair and body to all.
+        public IEnumerable<KoikatsuCardReader.RendererPropertyDto>
+            GetRendererProperties(
+                int objectType,
+                int coordinateIndex,
+                int slot,
+                string rendererName)
+        {
+            for (var index = 0; index < rendererProperties.Count; index++)
+            {
+                var property = rendererProperties[index];
+                if (property == null ||
+                    property.ObjectType != objectType ||
+                    !CoordinateMatches(
+                        objectType,
+                        coordinateIndex,
+                        property.CoordinateIndex) ||
+                    slot >= 0 && property.Slot != slot ||
+                    !string.Equals(
+                        RendererNameFormatted(property.RendererName),
+                        RendererNameFormatted(rendererName),
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                yield return property;
+            }
+        }
+
+        private static string RendererNameFormatted(string name) =>
+            (name ?? string.Empty).Replace("(Instance)", string.Empty)
+                .Replace(" Instance", string.Empty).Trim();
 
         public bool TryGetTextureData(int textureId, out byte[] data)
         {

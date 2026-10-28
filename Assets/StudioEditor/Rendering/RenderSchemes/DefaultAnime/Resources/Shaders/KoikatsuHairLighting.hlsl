@@ -28,6 +28,9 @@ half3 EvaluateSourceHair(Varyings input, half3 albedo, half3 normalWS, Light lig
         glossUv * _HairGloss_ST.xy + _HairGloss_ST.zw).r;
     half shifted = SAMPLE_TEXTURE2D(_HairGloss, sampler_HairGloss,
         (glossUv + float2(0, .008)) * _HairGloss_ST.xy + _HairGloss_ST.zw).r;
+    #if STUDIO_CHARACTER_DEBUG == 7
+    gloss = 0; shifted = 0;
+    #endif
     half difference = .5h * (shifted - gloss);
     half3 ambient = saturate(_SourceAmbientShadow.a > 0
         ? lerp(_SourceAmbientShadow.rgb, 1, _SourceAmbientShadow.a)
@@ -37,7 +40,7 @@ half3 EvaluateSourceHair(Varyings input, half3 albedo, half3 normalWS, Light lig
     half rampWeight = saturate(min(ramp, alternate));
     half weight = rampWeight * (1 - detail.g) * light.distanceAttenuation * light.shadowAttenuation;
     half3 color = lerp(lit * shadow, lit, weight) + gloss * (.5h * ramp + .5h);
-    if (_SourceHairLow < .5h)
+    if (_SourceHairLow < .5h && STUDIO_CHARACTER_DEBUG != 7)
     {
         half hue = SourceRgbToHsv(_SourceAmbientShadow.rgb).x;
         half rim = saturate(pow(1 - saturate(noV), 1 + 9 * _SourceRimPower) * 5 - 1.5h);

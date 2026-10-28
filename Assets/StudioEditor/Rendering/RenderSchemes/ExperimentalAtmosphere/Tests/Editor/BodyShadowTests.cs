@@ -108,6 +108,50 @@ namespace StudioEditor.Rendering.Experimental.Tests
             finally {Object.DestroyImmediate(garment);Object.DestroyImmediate(hair);}
         }
 
+        [TestCase(1)] [TestCase(2)] [TestCase(3)] [TestCase(4)]
+        public void WorldContactCacheOnlyOccludesAmbientNotTheToonBand(int model)
+        {
+            using var scene = new Surface(model);
+            string[] vectors = {"_StudioProbeGrid","_StudioProbeOrigin","_StudioContactGrid","_StudioContactOrigin",
+                "_StudioContactSettings","_StudioLocalSunDirection"};
+            var saved = Array.ConvertAll(vectors, Shader.GetGlobalVector);
+            // A cache that reports full occlusion and a blocked sun around the quad.
+            var contact = new Texture3D(8*7,8,8,TextureFormat.RFloat,false);
+            try
+            {
+                contact.SetPixelData(new float[8*7*8*8],0); contact.Apply();
+                Shader.SetGlobalTexture("_StudioLocalContact",contact);
+                Shader.SetGlobalVector("_StudioContactGrid",new Vector4(8,8,8,1));
+                Shader.SetGlobalVector("_StudioContactOrigin",new Vector4(-3,-3,-3.5f,0));
+                Shader.SetGlobalVector("_StudioContactSettings",new Vector4(.35f,.025f,0,0));
+                Shader.SetGlobalVector("_StudioLocalSunDirection",new Vector4(0,0,1,0));
+                // The irradiance volume lies far away, so only the contact cache applies.
+                Shader.SetGlobalVector("_StudioProbeGrid",new Vector4(8,8,8,1));
+                Shader.SetGlobalVector("_StudioProbeOrigin",new Vector4(100,100,100,0));
+                Shader.SetGlobalVector("_MainLightPosition",new Vector4(0,0,1,0));
+                Color Draw(bool cache) { Shader.SetGlobalVector("_StudioLocalLighting",cache?new Vector4(1,0,1,1):Vector4.zero); return scene.Draw()[8*16+8]; }
+                var direct=Draw(false); var directCached=Draw(true);
+                Assert.That(direct.maxColorComponent,Is.GreaterThan(.05f));
+                Assert.That(directCached.r,Is.EqualTo(direct.r).Within(.002f),"The coarse world cache must not reshape the toon band.");
+                Assert.That(directCached.g,Is.EqualTo(direct.g).Within(.002f));
+                Assert.That(directCached.b,Is.EqualTo(direct.b).Within(.002f));
+                Shader.SetGlobalVector("_MainLightColor",Vector4.zero);
+                Shader.SetGlobalVector("_StudioSurfaceLighting",new Vector4(1,1,1,1));
+                Shader.SetGlobalVector("unity_SHAr",new Vector4(0,0,0,.4f));
+                Shader.SetGlobalVector("unity_SHAg",new Vector4(0,0,0,.4f));
+                Shader.SetGlobalVector("unity_SHAb",new Vector4(0,0,0,.4f));
+                var ambient=Draw(false); var ambientCached=Draw(true);
+                Assert.That(ambient.maxColorComponent,Is.GreaterThan(.02f));
+                Assert.That(ambientCached.maxColorComponent,Is.LessThan(ambient.maxColorComponent*.5f),"Ambient light still receives world occlusion.");
+            }
+            finally
+            {
+                for(int i=0;i<vectors.Length;i++) Shader.SetGlobalVector(vectors[i],saved[i]);
+                Shader.SetGlobalTexture("_StudioLocalContact",null);
+                Object.DestroyImmediate(contact);
+            }
+        }
+
         static Texture2DArray HalfDepth(int size)
         {
             var texture=new Texture2DArray(size,size,1,TextureFormat.R16,false,true);

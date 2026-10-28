@@ -107,8 +107,25 @@ namespace StudioEditor.Rendering
                     "Transparent",
                     StringComparison.OrdinalIgnoreCase))
             {
-                ConfigureTransparent(destination);
+                // Keep the source draw order: Koikatsu front-hair materials carry
+                // a custom queue (2850) ahead of the transparent layers they must
+                // cover, rather than the generic 3000.
+                ConfigureTransparent(destination, source.renderQueue);
+                if (WritesDepthWhileBlending(source) && destination.HasProperty("_ZWrite"))
+                {
+                    destination.SetFloat("_ZWrite", 1f);
+                }
             }
+        }
+
+        // Pass state is not exposed by the Unity API. Shader Forge/main_hair_front
+        // (bo_hair_f_00.unity3d, Unity 5.6) blends SrcAlpha/OneMinusSrcAlpha with
+        // ZWrite On in its FORWARD and OUTLINE passes; without depth, overlapping
+        // strands and their back faces composite in triangle order.
+        private static bool WritesDepthWhileBlending(Material source)
+        {
+            var name = source.shader != null ? source.shader.name : string.Empty;
+            return string.Equals(name, "Shader Forge/main_hair_front", StringComparison.Ordinal);
         }
 
         public static void ConfigureTransparent(

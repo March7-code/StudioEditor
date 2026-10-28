@@ -2,6 +2,18 @@
 
 此目录提供独立的场景级实验方案。切换入口只有 `ExperimentalRenderConfiguration.cs`，没有新增 UI。当前默认启用实验；进入 Play Mode 后自动创建运行期管线副本，目标相机默认跟随 `Camera.main`。
 
+**当前默认值（2026-10-28）**：体积雾（`Settings.Density = 0`）与相机位置的场景反射探针（`Surfaces.SceneReflectionProbe = false`）暂时关闭。两者都随相机位置／朝向变化，叠在人物 toon 受光上会造成随视角变化的发灰与反射跳变。需要对照时在代码中重新打开。
+
+**人物与场景光照的职责划分**：
+
+| 来源 | 作用于人物 | 作用于场景 |
+| --- | --- | --- |
+| URP 主光／附加灯阴影图、面部 SDF、头发／服装专用影图 | 直射光可见度（toon 分段的唯一输入） | 直射光可见度 |
+| 局部光照缓存的 GI、天空可见度、AO | 只作用于环境光项 | 环境光、反弹光、反射 |
+| 局部光照缓存的主光接触阴影 | 不使用 | 主光短距离遮挡 |
+
+人物不进入局部光照的光追场景（实例 mask 8，只供体积雾的主光射线使用），因此不会被自己的几何以 10 cm 精度重新投影。
+
 Unity Scene View 尚未走完整的实验受光、显示变换和体积效果，因此不能用它与 Game 直接比较亮度。具体相机差异、恋活原版参数与社区星铁材质适配调查见 [人物渲染调查](../../StarRailCharacterStudy.md)。
 
 ## 代码开关
@@ -44,7 +56,9 @@ ExperimentalRenderConfiguration.Surfaces.SceneReflectionProbe = true;
 
 表面方案保留原 toon 明暗分段，将主光遮挡与明暗分段分开计算。角色附加灯现在使用带阴影的 URP 采样；头发、皮肤、衣服、配件的高光强度从导入时的明确角色类型选择，脸部暂不新增高光。非金属也可以按 Fresnel 接收环境反射，不再要求金属度大于 0。
 
-源身体皮肤（model 3）保留导入 Ramp 的明暗分段，并用导入材质的 `_ShadowColor` 限制源阴影端点，避免原环境叠色将暗部抬得接近白色。实验身体接收主光、附加灯的原生影图时，使用单次双线性深度比较，不叠加宽 PCF；灯光强度、阴影强度及附加灯的距离淡出仍保留。服装投到身体的专用影图也只保留一组双线性比较。面部、眼睛、头发、服装本体和默认方案不应用这项身体影图采样。源身体高光仍走其独立材质参数，不受通用 `SkinHighlight` 控制。
+源身体皮肤（model 3）和源服装（model 1）保留导入 Ramp 的明暗分段，并统一限制源阴影端点，避免原环境叠色将暗部抬得接近白色。身体使用皮肤的 `_ShadowColor`，服装使用原材质导入的 `_SourceShadowColor`，因此浅色袜子也能显示明暗分界，并保留自身的阴影色。该限制只在实验表面受光中启用。
+
+实验身体皮肤（model 3）与源服装（model 1）接收主光、附加灯的原生影图时，不使用 URP 的 7×7 软阴影；改用 5×5 tent 比较求出亚 texel 精度的边缘位置，再在 50% 处重新锐化（约半个 texel 的过渡），使投影边缘与 toon 分段一样硬，又不出现单次比较的 texel 锯齿和掠射角撕裂。重新锐化后没有宽 PCF 掩盖自阴影噪点，因此接收点沿几何法线和光线方向偏移约一个影图 texel（掠射角更大），偏移量按当前级联／影图的 texel 世界尺寸计算；灯光强度、阴影强度及附加灯的距离淡出仍保留。服装投到身体的专用影图也只保留一组双线性比较。面部（SDF）、眼睛、头发和默认方案不应用这项硬影图采样。源身体高光仍走其独立材质参数，不受通用 `SkinHighlight` 控制。
 
 | `Surfaces` 参数 | 作用 |
 | --- | --- |
@@ -91,9 +105,9 @@ ExperimentalRenderSession.Current.RefreshLocalLighting();
 
 较细的局部缓存存储六组半球短射线的可见度，以及主光方向的近处命中距离。表面从法线外侧的邻近单元插值，遮蔽作用于环境光、反弹光和反射；接触阴影只补主光的短距离遮挡，不把整个输出颜色乘黑。原角色 toon 分段与平涂细节保留，没有新增面部 SDF 阴影设计。
 
-场景 URP Lit 使用运行期 `ExperimentalLocalLit` 副本，保留 URP 的法线、粗糙度、透明裁剪、附加灯、阴影和雾处理。角色直接在原 toon shader 的实验分支读取缓存。关闭局部光照或回切原方案会恢复被替换的场景材质；原资源材质不改写。GPU 从模型缓冲读取几何，支持旧 bundle 中 CPU 不可读的网格；蒙皮复用当前姿态网格。
+场景 URP Lit 使用运行期 `ExperimentalLocalLit` 副本，保留 URP 的法线、粗糙度、透明裁剪、附加灯、阴影和雾处理。角色直接在原 toon shader 的实验分支读取缓存，但只用于环境光项；直射光的 toon 分段不读取缓存的遮蔽或接触阴影。关闭局部光照或回切原方案会恢复被替换的场景材质；原资源材质不改写。GPU 从模型缓冲读取几何，支持旧 bundle 中 CPU 不可读的网格；蒙皮复用当前姿态网格。
 
-局部光照会纳入已知 Lit/toon 表面中原来关闭投影的模型，以补回导入地图的几何缺失。Alpha Clip 用基础贴图 alpha、基础颜色 alpha 和 cutoff 过滤命中；连续透明表面仍跳过。原体积阴影使用独立实例 mask，继续沿用原不透明投影名单，不会把新增透明裁剪槽位误当作实心遮挡。
+局部光照会纳入已知 Lit / Studio item 表面中原来关闭投影的模型，以补回导入地图的几何缺失；人物（`CharacterShadowBinding` 下或使用 `StudioEditor/AnimeCharacter`）不纳入。Alpha Clip 用基础贴图 alpha、基础颜色 alpha 和 cutoff 过滤命中；连续透明表面仍跳过。原体积阴影使用独立实例 mask，继续沿用原不透明投影名单，不会把新增透明裁剪槽位误当作实心遮挡。
 
 | `LocalLighting` 参数 | 作用 |
 | --- | --- |
@@ -105,7 +119,7 @@ ExperimentalRenderSession.Current.RefreshLocalLighting();
 | `ContactGrid` / `ContactSpacing` | 接触缓存单元数与间距，默认 80×40×80、0.1 米 |
 | `RaysPerDirection` / `ContactRaysPerDirection` | 每个单元每个方向的半球射线数，默认 8 / 4 |
 | `UpdatesPerSecond` / `ContactUpdatesPerSecond` | 辐射/接触缓存刷新频率，默认 2 / 4 Hz |
-| `AnchorDistance` | 缓存中心距相机的前向距离，默认 6 米；`Coverage` 视图可检查范围 |
+| `AnchorDistance` | 缓存中心沿相机水平朝向的前向距离，默认 2.5 米；不随俯仰上下移动。`Coverage` 视图可检查范围 |
 | `DebugView` | 代码控制的光照与范围诊断视图 |
 
 缓存跟随相机并对齐到世界单元。相机移动到新的缓存范围、主光改变、参数改变、几何重建或显式刷新时更新相应缓存；否则重用上次结果。普通刷新不重复拷贝未改变的基础贴图。通过 `LocalLightingReady` / `LocalLightingStatus` 可检查是否已经产生结果。需要 DX12 / DXR；硬件不可用时跳过这部分并保留常规表面受光，绝不自动换成屏幕空间方案。

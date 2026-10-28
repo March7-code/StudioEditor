@@ -493,7 +493,7 @@ namespace StudioEditor.ReferenceModels
                     await ReferenceModelLoadContext.YieldAsync(cancellationToken, asynchronous);
                     try
                     {
-                        await LoadAccessoriesAsync(
+                        var hidesHair = await LoadAccessoriesAsync(
                             card,
                             abdataRoot,
                             catalog,
@@ -506,6 +506,10 @@ namespace StudioEditor.ReferenceModels
                             textureLoader,
                             coordinateIndex,
                             cancellationToken, asynchronous);
+                        if (hidesHair)
+                        {
+                            HideHairParts(headSkeleton.transform);
+                        }
                     }
                     catch (Exception exception) when (
                         IsOptionalPartFailure(exception))
@@ -1661,7 +1665,28 @@ namespace StudioEditor.ReferenceModels
                    optionIndex >= hidden.Count || !hidden[optionIndex];
         }
 
-        private static async Task LoadAccessoriesAsync(
+        // ChaControl.UpdateVisible deactivates every objHair part while
+        // CheckHideHair is true: a shown accessory whose list entry sets
+        // HideHair (for example a full wig or helmet) replaces the hair.
+        private static void HideHairParts(Transform headSkeleton)
+        {
+            var hairParent = FindByName(headSkeleton, "cf_J_FaceUp_ty");
+            if (hairParent == null)
+            {
+                return;
+            }
+
+            foreach (var name in HairObjectNames)
+            {
+                var part = hairParent.Find(name);
+                if (part != null)
+                {
+                    part.gameObject.SetActive(false);
+                }
+            }
+        }
+
+        private static async Task<bool> LoadAccessoriesAsync(
             KoikatsuCard card,
             string abdataRoot,
             KoikatsuListCatalog catalog,
@@ -1675,9 +1700,10 @@ namespace StudioEditor.ReferenceModels
             int coordinateIndex,
             CancellationToken cancellationToken, bool asynchronous)
         {
+            var hidesHair = false;
             if (card.Coordinates == null || card.Coordinates.Count == 0)
             {
-                return;
+                return false;
             }
 
             var coordinate = card.Coordinates[coordinateIndex];
@@ -1752,12 +1778,17 @@ namespace StudioEditor.ReferenceModels
                                   slot >= showAccessories.Count ||
                                   showAccessories[slot];
                     instance.SetActive(visible);
+                    var hideHair = entry.Get("HideHair") == "1";
+                    // ChaControl.CheckHideHair: only shown accessories hide hair.
+                    hidesHair |= hideHair && visible;
                     ApplyAccessoryMoves(
                         instance.transform,
                         accessory.AdditionalMoves,
-                        entry.Get("HideHair") == "1");
+                        hideHair);
                 }
             }
+
+            return hidesHair;
         }
 
         private static Transform ResolveAccessoryParent(

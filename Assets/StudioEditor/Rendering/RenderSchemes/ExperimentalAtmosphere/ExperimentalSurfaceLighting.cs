@@ -280,6 +280,15 @@ namespace StudioEditor.Rendering.Experimental
                 tonemapping.mode.Override(TonemappingMode.Neutral);
                 exposure = displayProfile.Add<ColorAdjustments>(false);
                 exposure.postExposure.Override(Mathf.Clamp(value, -4, 4));
+                // Enabling post processing for the display transform also
+                // enables the pipeline's default / scene Volume effects.
+                // The experiment does not request glow: override its intensity
+                // explicitly, since inactive components leave lower profiles
+                // (including the former SampleSceneProfile default) in effect.
+                var bloom = displayProfile.Add<Bloom>(false);
+                bloom.intensity.Override(0f);
+                bloom.dirtIntensity.Override(0f);
+                displayProfile.Add<ScreenSpaceLensFlare>(false).intensity.Override(0f);
                 displayVolume.sharedProfile = displayProfile;
             }
             exposure.postExposure.value = Mathf.Clamp(value, -4, 4);

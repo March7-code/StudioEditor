@@ -19,6 +19,6 @@ void RayGenExecute(UnifiedRT::DispatchInfo info)
     ray.tMin = 0.01;
     ray.tMax = _FogRayDistance;
     bool blocked = UnifiedRT::TraceRayAnyHit(info, UNIFIED_RT_GET_ACCEL_STRUCT(_FogScene),
-        1, ray, UnifiedRT::kRayFlagNone);
+        9, ray, UnifiedRT::kRayFlagNone); // GeometryShadowWorld.FogRayMask
     _FogVisibilityOutput[id] = blocked ? 0.0 : 1.0;
 }

@@ -81,7 +81,7 @@ namespace StudioEditor.Rendering.Experimental
                 for (int sub = 0; sub < mesh.subMeshCount; sub++)
                 {
                     var material = sub < source.Length ? source[sub] : null;
-                    if (mesh.GetTopology(sub) != MeshTopology.Triangles || !world.AcceptsSurface(material)) continue;
+                    if (mesh.GetTopology(sub) != MeshTopology.Triangles || !world.AcceptsSlot(item, material)) continue;
                     if (!materialIds.TryGetValue(material, out int id))
                     {
                         id = materials.Count; materialIds.Add(material, id); materials.Add(material);
@@ -210,7 +210,7 @@ namespace StudioEditor.Rendering.Experimental
                     var source = item.Renderer.sharedMaterials;
                     for (int sub = 0; sub < mesh.subMeshCount; sub++)
                     {
-                        if (mesh.GetTopology(sub) != MeshTopology.Triangles || sub >= source.Length || !world.AcceptsSurface(source[sub])) continue;
+                        if (mesh.GetTopology(sub) != MeshTopology.Triangles || sub >= source.Length || !world.AcceptsSlot(item, source[sub])) continue;
                         var slot = slots[slotIndex++];
                         cmd.SetComputeVectorParam(copy, "_TriangleRange", new Vector4(slot.offset, slot.count,
                             mesh.GetIndexStart(sub), mesh.GetBaseVertex(sub)));

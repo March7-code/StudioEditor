@@ -70,7 +70,11 @@ namespace StudioEditor.Rendering.Experimental
                     Contact = Create(contact, 7, GraphicsFormat.R16_SFloat, "World contact ray distances", out ContactHandle);
                     dirty = true;
                 }
-                Vector3 anchor = camera.transform.position + camera.transform.forward * Mathf.Clamp(settings.AnchorDistance, 0, 50);
+                // Follow camera yaw only. With pitch the shallow cache (4 m tall by default)
+                // swings metres up or down, and nearby surfaces cross its fade border.
+                Vector3 heading = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up);
+                heading = heading.sqrMagnitude > 1e-4f ? heading.normalized : Vector3.zero;
+                Vector3 anchor = camera.transform.position + heading * Mathf.Clamp(settings.AnchorDistance, 0, 50);
                 Vector3 giOrigin = Snap(anchor, giStep) - ((Vector3)probe - Vector3.one) * (giStep * 0.5f);
                 Vector3 aoOrigin = Snap(anchor, aoStep * 4) - ((Vector3)contact - Vector3.one) * (aoStep * 0.5f);
                 bool changed = lastCamera != camera || probeSpacing != giStep || contactSpacing != aoStep ||

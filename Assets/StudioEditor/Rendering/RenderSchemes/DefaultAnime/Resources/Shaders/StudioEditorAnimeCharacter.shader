@@ -84,6 +84,7 @@ Shader "StudioEditor/AnimeCharacter"
         [HideInInspector] _SourceHairLow("Source low-detail hair", Float) = 0
         [HideInInspector] _SourceCharacterModel("Source diffuse model", Float) = 0
         [HideInInspector] _SourceCharacterShading("Source scene shading", Float) = 0
+        [HideInInspector] _SourceNormalEncoding("Source AG normal encoding (base, detail)", Vector) = (0,0,0,0)
         [HideInInspector] _SourceShadowColor("Source shadow color", Color) = (.628,.628,.628,1)
         [HideInInspector] _SourceShadowExtend("Source shadow extend", Float) = .5
         [HideInInspector] _SourceShadowExtendAnother("Source alternate shadow extend", Float) = 0
@@ -210,6 +211,16 @@ Shader "StudioEditor/AnimeCharacter"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "Assets/StudioEditor/Rendering/RenderSchemes/ExperimentalAtmosphere/Resources/StudioEditorAtmosphere/LocalLightingSampling.hlsl"
+
+            // Character lighting diagnostics. Change the number and save; 0 = off.
+            // 1 path: orange source clothes, red source body/face, green source hair,
+            //   blue source eyes, white generic (non-source) branch
+            // 2 range: magenta NaN/Inf, red > 4, yellow > 1.5, otherwise gray at half luminance
+            // 3 no additional lights   4 additional lights only (main light and environment off)
+            // 5 no environment (SH, local GI, reflections)   6 no emission
+            // 7 no specular / rim in any path (source body, clothes, hair; generic)   8 no generic reflection
+            // 9 main light shadow map ignored (attenuation 1)   10 main light shadow attenuation as gray
+            #define STUDIO_CHARACTER_DEBUG 0
 
             // Supplied only while the scene experiment renders its target camera.
             float4 _StudioSurfaceLighting; // enabled, direct, ambient, light color influence
@@ -358,6 +369,7 @@ Shader "StudioEditor/AnimeCharacter"
                 float4 _AnotherRamp_ST;
                 float4 _NormalMap_ST;
                 float4 _NormalMapDetail_ST;
+                float4 _SourceNormalEncoding;
                 half _DetailNormalMapScale;
                 half _SpecularPowerNail;
                 half _linetexon;
@@ -546,22 +558,35 @@ Shader "StudioEditor/AnimeCharacter"
                 return EvaluateSourceBodyClothes(input, albedo, normalWS, light, frontFace, environment);
             }
 
+            half3 StudioCharacterDebug(half3 color)
+            {
+                #if STUDIO_CHARACTER_DEBUG == 1
+                if (_SourceCharacterShading < .5h || _SourceCharacterModel < .5h) return 1;
+                return _SourceCharacterModel == 1 ? half3(1, .5h, 0) : _SourceCharacterModel == 2 ? half3(0, 1, 0) :
+                    _SourceCharacterModel >= 5 ? half3(0, 0, 1) : half3(1, 0, 0);
+                #elif STUDIO_CHARACTER_DEBUG == 2
+                // Bit test: fast-math may fold isnan / isinf away.
+                uint3 bits = asuint((float3)color) & 0x7f800000u;
+                if (any(bits == 0x7f800000u)) return half3(1, 0, 1);
+                half peak = max(color.r, max(color.g, color.b));
+                return peak > 4 ? half3(1, 0, 0) : peak > 1.5h ? half3(1, 1, 0) : Luminance(color).xxx * .5h;
+                #else
+                return color;
+                #endif
+            }
+
+            // Direct light visibility comes only from shadow maps. The world
+            // cache is a coarse continuous field; feeding it into the toon ramp
+            // weight smears the binary boundary as the camera-anchored cache moves.
             void GatherSourceLight(Varyings input, half3 albedo, half3 normalWS, bool frontFace,
-                half irisVisibility, StudioLocalLight local, Light candidate, bool mainSun,
+                half irisVisibility, Light candidate,
                 inout Light selected, inout half brightness, inout half3 direct)
             {
                 candidate = SourceFaceSceneLight(input, candidate);
                 candidate.color = SourceLegacyLightColor(candidate, input.positionWS);
                 half value = Luminance(candidate.color) * candidate.distanceAttenuation;
                 if (_StudioSurfaceLighting.x > .5h && value > 0)
-                {
-                    // The cache's sun visibility belongs only to world lights.
-                    #ifdef _LIGHT_LAYERS
-                    if (mainSun && (candidate.layerMask & 1u) != 0u) candidate.shadowAttenuation *= local.sunVisibility;
-                    #endif
-                    candidate.shadowAttenuation *= local.occlusion;
                     direct += EvaluateSourceCharacter(input, albedo, normalWS, candidate, frontFace, 0, irisVisibility);
-                }
                 if (value > brightness) { selected = candidate; brightness = value; }
             }
 
@@ -663,6 +688,12 @@ Shader "StudioEditor/AnimeCharacter"
                 bool sourceEye = _SourceCharacterModel == 5 || _SourceCharacterModel == 6;
                 if (sourceEye) normalWS = geometricNormal;
                 bool frontFace = IS_FRONT_VFACE(facing, true, false);
+                // Double-sided (Cull Off) cards: a back face must be lit from its
+                // own side. With the front normal, thin strands and hair-card
+                // accessories seen from behind light up while their visible
+                // side faces away from the key light. Source paths below set
+                // their own oriented normals.
+                if (!frontFace) normalWS = -normalWS;
                 if (sourceHair) normalWS = SourceHairNormal(input, frontFace);
                 if (sourceBodyClothes)
                 {
@@ -670,8 +701,9 @@ Shader "StudioEditor/AnimeCharacter"
                         normalize(input.bitangentWS), geometricNormal * (frontFace ? 1 : -1));
                     normalWS = _SourceCharacterModel == 3 || _SourceCharacterModel == 4
                         ? SourceBodyNormal(input, geometricNormal, sourceTangentToWorld)
-                        : normalize(TransformTangentToWorld(UnpackNormal(SAMPLE_TEXTURE2D(
-                            _NormalMap, sampler_NormalMap, input.rawUV * _NormalMap_ST.xy + _NormalMap_ST.zw)), sourceTangentToWorld));
+                        : normalize(TransformTangentToWorld(SourceUnpackNormal(SAMPLE_TEXTURE2D(
+                            _NormalMap, sampler_NormalMap, input.rawUV * _NormalMap_ST.xy + _NormalMap_ST.zw),
+                            _SourceNormalEncoding.x), sourceTangentToWorld));
                 }
                 half3 viewWS = GetWorldSpaceNormalizeViewDir(
                     input.positionWS);
@@ -725,7 +757,15 @@ Shader "StudioEditor/AnimeCharacter"
 
                 Light mainLight = GetMainLight(
                     TransformWorldToShadowCoord(input.positionWS));
-                mainLight.shadowAttenuation = SourceBodyMainShadow(input.positionWS, mainLight.shadowAttenuation);
+                // Bias along the facing geometric normal; mapped normals would add noise.
+                half3 shadowNormal = geometricNormal * (frontFace ? 1 : -1);
+                mainLight.shadowAttenuation = SourceBodyMainShadow(input.positionWS, shadowNormal,
+                    mainLight.direction, mainLight.shadowAttenuation);
+                #if STUDIO_CHARACTER_DEBUG == 9
+                mainLight.shadowAttenuation = 1;
+                #elif STUDIO_CHARACTER_DEBUG == 10
+                return half4(mainLight.shadowAttenuation.xxx, baseSample.a);
+                #endif
                 #ifdef _LIGHT_LAYERS
                 uint meshRenderingLayers = GetMeshRenderingLayer();
                 if (!IsMatchingLightLayer(mainLight.layerMask, meshRenderingLayers)) mainLight.color = 0;
@@ -741,12 +781,18 @@ Shader "StudioEditor/AnimeCharacter"
                         sourceEnvironment = (EvaluateLightColor(SampleSH(normalWS)) * _StudioSurfaceLighting.z *
                             sourceLocal.skyVisibility + sourceLocal.indirect) * sourceLocal.occlusion;
                     }
+                    #if STUDIO_CHARACTER_DEBUG == 4 || STUDIO_CHARACTER_DEBUG == 5
+                    sourceEnvironment = 0;
+                    #endif
+                    #if STUDIO_CHARACTER_DEBUG == 4
+                    mainLight.color = 0;
+                    #endif
                     Light sourceLight = mainLight;
                     half sourceBrightness = -1;
                     half3 sourceDirect = 0;
                     GatherSourceLight(input, baseSample.rgb, normalWS, frontFace, irisDetailVisibility,
-                        sourceLocal, mainLight, true, sourceLight, sourceBrightness, sourceDirect);
-                    #if defined(_ADDITIONAL_LIGHTS)
+                        mainLight, sourceLight, sourceBrightness, sourceDirect);
+                    #if defined(_ADDITIONAL_LIGHTS) && STUDIO_CHARACTER_DEBUG != 3
                     InputData inputData = (InputData)0;
                     inputData.positionWS = input.positionWS;
                     inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
@@ -756,22 +802,22 @@ Shader "StudioEditor/AnimeCharacter"
                         lightIndex < min(URP_FP_DIRECTIONAL_LIGHTS_COUNT, MAX_VISIBLE_LIGHTS); lightIndex++)
                     {
                         Light candidate = GetAdditionalLight(lightIndex, input.positionWS, half4(1,1,1,1));
-                        candidate.shadowAttenuation = SourceBodyAdditionalShadow(lightIndex, input.positionWS, candidate);
+                        candidate.shadowAttenuation = SourceBodyAdditionalShadow(lightIndex, input.positionWS, shadowNormal, candidate);
                         #ifdef _LIGHT_LAYERS
                         if (!IsMatchingLightLayer(candidate.layerMask, meshRenderingLayers)) continue;
                         #endif
                         GatherSourceLight(input, baseSample.rgb, normalWS, frontFace, irisDetailVisibility,
-                            sourceLocal, candidate, false, sourceLight, sourceBrightness, sourceDirect);
+                            candidate, sourceLight, sourceBrightness, sourceDirect);
                     }
                     #endif
                     LIGHT_LOOP_BEGIN(additionalLightCount)
                         Light candidate = GetAdditionalLight(lightIndex, input.positionWS, half4(1,1,1,1));
-                        candidate.shadowAttenuation = SourceBodyAdditionalShadow(lightIndex, input.positionWS, candidate);
+                        candidate.shadowAttenuation = SourceBodyAdditionalShadow(lightIndex, input.positionWS, shadowNormal, candidate);
                         #ifdef _LIGHT_LAYERS
                         if (!IsMatchingLightLayer(candidate.layerMask, meshRenderingLayers)) continue;
                         #endif
                         GatherSourceLight(input, baseSample.rgb, normalWS, frontFace, irisDetailVisibility,
-                            sourceLocal, candidate, false, sourceLight, sourceBrightness, sourceDirect);
+                            candidate, sourceLight, sourceBrightness, sourceDirect);
                     LIGHT_LOOP_END
                     #endif
                     half3 sourceColor = EvaluateSourceCharacter(input, baseSample.rgb, normalWS,
@@ -783,12 +829,11 @@ Shader "StudioEditor/AnimeCharacter"
                         sourceColor += sourceDirect - EvaluateSourceCharacter(input, baseSample.rgb, normalWS,
                             sourceLight, frontFace, 0, irisDetailVisibility);
                     }
-                    return half4(MixFog(sourceColor, input.fogFactor), baseSample.a);
+                    return half4(StudioCharacterDebug(MixFog(sourceColor, input.fogFactor)), baseSample.a);
                 }
                 StudioLocalLight localLight = StudioSampleLocalLight(input.positionWS, normalWS);
                 if (_StudioLocalDebug > 0 && _StudioLocalLighting.x > 0.5)
                     return half4(StudioLocalDebugColor(localLight, input.positionWS), baseSample.a);
-                mainLight.shadowAttenuation *= lerp(localLight.sunVisibility, 1.0h, _ImportedCharacterKey);
                 half halfLambert = dot(normalWS, mainLight.direction) *
                                    0.5h + 0.5h;
                 half mainValue = saturate(
@@ -810,7 +855,15 @@ Shader "StudioEditor/AnimeCharacter"
                         mainLight.distanceAttenuation * mainLight.shadowAttenuation;
                 }
 
-                #if defined(_ADDITIONAL_LIGHTS_VERTEX)
+                #if STUDIO_CHARACTER_DEBUG == 4
+                lighting = 0;
+                #elif STUDIO_CHARACTER_DEBUG == 5
+                lighting -= EvaluateLightColor(SampleSH(normalWS)) * (_StudioSurfaceLighting.x > 0.5 ?
+                    _StudioSurfaceLighting.z * localLight.skyVisibility * localLight.occlusion : _AmbientStrength) +
+                    (_StudioSurfaceLighting.x > 0.5 ? localLight.indirect * localLight.occlusion : 0);
+                #endif
+
+                #if defined(_ADDITIONAL_LIGHTS_VERTEX) && STUDIO_CHARACTER_DEBUG != 3
                 lighting += EvaluateLightColor(input.vertexLighting) *
                             _AdditionalLightStrength;
                 #endif
@@ -823,8 +876,11 @@ Shader "StudioEditor/AnimeCharacter"
                     metallic,
                     smoothness,
                     specularMask);
+                #if STUDIO_CHARACTER_DEBUG == 4
+                specular = 0;
+                #endif
 
-                #if defined(_ADDITIONAL_LIGHTS)
+                #if defined(_ADDITIONAL_LIGHTS) && STUDIO_CHARACTER_DEBUG != 3
                 InputData inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;
                 inputData.normalizedScreenSpaceUV =
@@ -922,6 +978,9 @@ Shader "StudioEditor/AnimeCharacter"
                     if (_StudioSurfaceRole == 2 || _UseFlatColor > 0.5h) reflection = 0;
                 }
                 reflection *= localLight.occlusion;
+                #if STUDIO_CHARACTER_DEBUG == 4 || STUDIO_CHARACTER_DEBUG == 5 || STUDIO_CHARACTER_DEBUG == 8
+                reflection = 0;
+                #endif
 
                 half rim = pow(
                     saturate(1.0h - dot(normalWS, viewWS)),
@@ -932,6 +991,12 @@ Shader "StudioEditor/AnimeCharacter"
                     _EmissionMap,
                     sampler_EmissionMap,
                     input.uv).rgb * _EmissionColor.rgb;
+                #if STUDIO_CHARACTER_DEBUG == 6
+                emission = 0;
+                #endif
+                #if STUDIO_CHARACTER_DEBUG == 7
+                specular = 0; rim = 0;
+                #endif
                 half3 color = baseSample.rgb * lighting + specular +
                               reflection + _RimColor.rgb * rim + emission;
                 if (_UseFlatColor > 0.5h)
@@ -939,7 +1004,7 @@ Shader "StudioEditor/AnimeCharacter"
                     color = baseSample.rgb;
                 }
                 color = MixFog(color, input.fogFactor);
-                return half4(color, baseSample.a);
+                return half4(StudioCharacterDebug(color), baseSample.a);
             }
             ENDHLSL
         }
@@ -1072,6 +1137,7 @@ Shader "StudioEditor/AnimeCharacter"
                 float4 _AnotherRamp_ST;
                 float4 _NormalMap_ST;
                 float4 _NormalMapDetail_ST;
+                float4 _SourceNormalEncoding;
                 half _DetailNormalMapScale;
                 half _SpecularPowerNail;
                 half _linetexon;

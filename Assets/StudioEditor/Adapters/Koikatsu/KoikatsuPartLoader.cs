@@ -1203,6 +1203,47 @@ namespace StudioEditor.ReferenceModels
 
                     renderer.enabled = true;
                 }
+
+                // Renderer properties run after the texture visibility fix-up,
+                // as MaterialEditor's own LoadData applies them before materials.
+                foreach (var property in materialEditorData.GetRendererProperties(
+                             objectType,
+                             coordinateIndex,
+                             slot,
+                             renderer.name))
+                {
+                    ApplyRendererProperty(renderer, property);
+                }
+            }
+        }
+
+        // MaterialAPI.SetRendererProperty. RecalculateNormals is not replayed:
+        // it rewrites a shared source mesh. MaterialEditor skips
+        // UpdateWhenOffscreen on load.
+        private static void ApplyRendererProperty(
+            Renderer renderer,
+            KoikatsuCardReader.RendererPropertyDto property)
+        {
+            if (!int.TryParse(
+                    property.Value,
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var value))
+            {
+                return;
+            }
+
+            switch (property.Property)
+            {
+                case 0:
+                    renderer.enabled = value == 1;
+                    break;
+                case 1:
+                    renderer.shadowCastingMode = (UnityEngine.Rendering.ShadowCastingMode)value;
+                    break;
+                case 2:
+                    renderer.receiveShadows = value == 1;
+                    break;
             }
         }
 

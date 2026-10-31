@@ -1,0 +1,58 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\GameProject\\Editor\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{E74B4245-EED8-1A37-43E7-BD095C479B47}|StudioEditor.RenderScheme.ExperimentalAtmosphere.csproj|d:\\gameproject\\editor\\assets\\studioeditor\\rendering\\renderschemes\\experimentalatmosphere\\experimentalrendersession.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E74B4245-EED8-1A37-43E7-BD095C479B47}|StudioEditor.RenderScheme.ExperimentalAtmosphere.csproj|solutionrelative:assets\\studioeditor\\rendering\\renderschemes\\experimentalatmosphere\\experimentalrendersession.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C1A2C4E7-636B-5AB1-3DB8-DD9E38AE9A11}|StudioEditor.RenderScheme.DefaultAnime.csproj|d:\\gameproject\\editor\\assets\\studioeditor\\rendering\\renderschemes\\defaultanime\\resources\\shaders\\studioeditoranimecharacter.shader||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{C1A2C4E7-636B-5AB1-3DB8-DD9E38AE9A11}|StudioEditor.RenderScheme.DefaultAnime.csproj|solutionrelative:assets\\studioeditor\\rendering\\renderschemes\\defaultanime\\resources\\shaders\\studioeditoranimecharacter.shader||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "ExperimentalRenderSession.cs",
+              "DocumentMoniker": "D:\\GameProject\\Editor\\Assets\\StudioEditor\\Rendering\\RenderSchemes\\ExperimentalAtmosphere\\ExperimentalRenderSession.cs",
+              "RelativeDocumentMoniker": "Assets\\StudioEditor\\Rendering\\RenderSchemes\\ExperimentalAtmosphere\\ExperimentalRenderSession.cs",
+              "ToolTip": "D:\\GameProject\\Editor\\Assets\\StudioEditor\\Rendering\\RenderSchemes\\ExperimentalAtmosphere\\ExperimentalRenderSession.cs",
+              "RelativeToolTip": "Assets\\StudioEditor\\Rendering\\RenderSchemes\\ExperimentalAtmosphere\\ExperimentalRenderSession.cs",
+              "ViewState": "AgIAAEgAAAAAAAAAAAAAABYAAABIAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-10-28T01:32:08.46Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "StudioEditorAnimeCharacter.shader",
+              "DocumentMoniker": "D:\\GameProject\\Editor\\Assets\\StudioEditor\\Rendering\\RenderSchemes\\DefaultAnime\\Resources\\Shaders\\StudioEditorAnimeCharacter.shader",
+              "RelativeDocumentMoniker": "Assets\\StudioEditor\\Rendering\\RenderSchemes\\DefaultAnime\\Resources\\Shaders\\StudioEditorAnimeCharacter.shader",
+              "ToolTip": "D:\\GameProject\\Editor\\Assets\\StudioEditor\\Rendering\\RenderSchemes\\DefaultAnime\\Resources\\Shaders\\StudioEditorAnimeCharacter.shader",
+              "RelativeToolTip": "Assets\\StudioEditor\\Rendering\\RenderSchemes\\DefaultAnime\\Resources\\Shaders\\StudioEditorAnimeCharacter.shader",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-10-27T23:39:59.239Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

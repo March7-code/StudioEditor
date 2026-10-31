@@ -1,8 +1,8 @@
 // Reconstructed from main_hair / main_hair_front / main_hair_low FORWARD DXBC.
 half3 SourceHairNormal(Varyings input, bool frontFace)
 {
-    half3 normalTS = UnpackNormal(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap,
-        input.rawUV * _NormalMap_ST.xy + _NormalMap_ST.zw));
+    half3 normalTS = SourceUnpackNormal(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap,
+        input.rawUV * _NormalMap_ST.xy + _NormalMap_ST.zw), _SourceNormalEncoding.x);
     half3x3 frame = half3x3(normalize(input.tangentWS), normalize(input.bitangentWS),
         normalize(input.normalWS) * (frontFace ? 1 : -1));
     return normalize(TransformTangentToWorld(normalTS, frame));
@@ -11,10 +11,13 @@ half3 SourceHairNormal(Varyings input, bool frontFace)
 half3 EvaluateSourceHair(Varyings input, half3 albedo, half3 normalWS, Light light,
     bool frontFace, half3 environment)
 {
+    bool experiment = _StudioSurfaceLighting.x > .5h;
+    half directFacing = experiment ? SourceDirectFacing(input, light, frontFace) : 1.0h;
     half3 view = GetWorldSpaceNormalizeViewDir(input.positionWS);
     half noL = dot(normalWS, light.direction);
     half noV = dot(normalWS, view);
-    half ramp = SAMPLE_TEXTURE2D(_SourceRamp, sampler_SourceRamp, half2(noL, .5h)).r;
+    half rampLight = experiment ? saturate(noL - .08h) : noL;
+    half ramp = SAMPLE_TEXTURE2D(_SourceRamp, sampler_SourceRamp, half2(rampLight, .5h)).r;
     half alternate = _SourceHairLow > .5h ? ramp : SAMPLE_TEXTURE2D(_AnotherRamp,
         sampler_SourceRamp, noV * _AnotherRamp_ST.xy + _AnotherRamp_ST.zw).r;
     half4 detail = SAMPLE_TEXTURE2D(_DetailMask, sampler_DetailMask,
@@ -36,9 +39,13 @@ half3 EvaluateSourceHair(Varyings input, half3 albedo, half3 normalWS, Light lig
         ? lerp(_SourceAmbientShadow.rgb, 1, _SourceAmbientShadow.a)
         : _SourceAmbientShadow.rgb * (1 + _SourceAmbientShadow.a));
     half3 shadow = SourceOverlay(_SourceShadowColor.rgb, ambient);
+    if (experiment) shadow = min(shadow, saturate(_SourceShadowColor.rgb));
     half3 lit = albedo * lerp(1, shadow, difference);
     half rampWeight = saturate(min(ramp, alternate));
-    half weight = rampWeight * (1 - detail.g) * light.distanceAttenuation * light.shadowAttenuation;
+    half materialWeight = rampWeight * (1 - detail.g);
+    if (experiment) materialWeight = SourceNarrowToonBand(materialWeight);
+    materialWeight *= directFacing;
+    half weight = materialWeight * light.distanceAttenuation * light.shadowAttenuation;
     half3 color = lerp(lit * shadow, lit, weight) + gloss * (.5h * ramp + .5h);
     if (_SourceHairLow < .5h && STUDIO_CHARACTER_DEBUG != 7)
     {
@@ -53,6 +60,6 @@ half3 EvaluateSourceHair(Varyings input, half3 albedo, half3 normalWS, Light lig
     half3 illumination = max(.4h + .6h * light.color, _SourceAmbientShadow.rgb);
     if (_StudioSurfaceLighting.x > .5h)
         illumination = .6h * light.color * _StudioSurfaceLighting.y *
-            light.distanceAttenuation * light.shadowAttenuation + environment;
+            light.distanceAttenuation * light.shadowAttenuation * directFacing + environment;
     return color * illumination;
 }

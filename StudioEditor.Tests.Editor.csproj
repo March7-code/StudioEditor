@@ -58,6 +58,7 @@
     <Compile Include="Assets\StudioEditor\Tests\Editor\KoikatsuSurfaceShadingTests.cs" />
     <Compile Include="Assets\StudioEditor\Tests\Editor\EyeLookImportTests.cs" />
     <Compile Include="Assets\StudioEditor\Tests\Editor\KoikatsuPhysicsImportTests.cs" />
+    <Compile Include="Assets\StudioEditor\Tests\Editor\KoikatsuMaterialEditorRendererTests.cs" />
     <Compile Include="Assets\StudioEditor\Tests\Editor\LoadPipelineTests.cs" />
     <Compile Include="Assets\StudioEditor\Tests\Editor\KoikatsuCharacterShadingTests.cs" />
     <Compile Include="Assets\StudioEditor\Tests\Editor\KoikatsuSceneMaterialTests.cs" />

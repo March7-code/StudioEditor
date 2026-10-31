@@ -313,10 +313,35 @@ half3 SourceProjectedSkinSurface(half3 surface, half3 shadowSurface, half visibi
     return lerp(surface, min(surface, shadowSurface), 1 - visibility);
 }
 
+half SourceDirectFacing(Varyings input, Light light, bool frontFace)
+{
+    // A dark toon endpoint is still a surface color, not permission for a
+    // light behind the surface to supply direct irradiance. Otherwise its
+    // shadow map cuts dark stripes into already back-facing cloth or hair.
+    // Use geometry here so normal-map details cannot reopen that back light.
+    half3 normal = normalize(input.normalWS) * (frontFace ? 1 : -1);
+    return smoothstep(0.0h, .05h, dot(normal, light.direction));
+}
+
+half SourceNarrowToonBand(half weight)
+{
+    // Reserve intermediate colors for a narrow boundary and favor the dark
+    // band. Shape the material weight before distance or shadow attenuation,
+    // so light falloff and a light's partial shadow strength remain intact.
+    return smoothstep(.55h, .65h, saturate(weight));
+}
+
 half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
     Light light, bool frontFace, half3 environment)
 {
     bool body = _SourceCharacterModel > 2.5h;
+    bool experiment = _StudioSurfaceLighting.x > .5h;
+    bool softBody = experiment && _SourceCharacterModel == 3;
+    // Skin shares the face's stylized light response: shape its material color
+    // rather than blacking out direct light at a geometric terminator. Scene
+    // visibility still removes blocked light; cloth keeps its geometric gate.
+    half directFacing = experiment && !body
+        ? SourceDirectFacing(input, light, frontFace) : 1.0h;
     half4 detail = SAMPLE_TEXTURE2D(_DetailMask, sampler_DetailMask,
         input.rawUV * _DetailMask_ST.xy + _DetailMask_ST.zw);
     half4 lineMask = SAMPLE_TEXTURE2D(_LineMask, sampler_LineMask,
@@ -324,8 +349,11 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
     half3 viewWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
     half noH = dot(normalWS, SafeNormalize(viewWS + light.direction));
     half noV = saturate(dot(normalWS, viewWS));
+    // Shift cloth's imported ramp toward its dark end as well as narrowing
+    // gray weights below; even a binary scene ramp then gains a larger shadow.
+    half rampLight = dot(normalWS, light.direction) - (experiment && !body ? .08h : 0.0h);
     half ramp = SAMPLE_TEXTURE2D(_SourceRamp, sampler_SourceRamp,
-        half2(saturate(dot(normalWS, light.direction)), .5h)).r;
+        half2(saturate(rampLight), .5h)).r;
     half curveShadow;
     ramp = SourceFaceCurveRamp(input, light, ramp, curveShadow);
     half hairVisibility = SourceFaceHairVisibility(input, light);
@@ -334,16 +362,11 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
     half3 hsv = SourceRgbToHsv(albedo * (body ? 1.0h : _SourceShadowColor.rgb));
     half3 shadowChroma = SourceHsvToRgb(half3(hsv.x, hsv.y * (body ? .66h : .5h), 1));
     half3 shadow = SourceOverlay(shadowChroma * .9h, ambient);
-    // The source ambient overlay can lift the dark endpoint almost to white,
-    // hiding even a binary ramp on pale skin or clothes. Both use the same
-    // palette limit in the experiment. Clothes retain their source material's
-    // shadow tint instead of borrowing the skin palette or the generic fallback.
-    if (_StudioSurfaceLighting.x > .5h &&
-        (_SourceCharacterModel == 3 || _SourceCharacterModel == 1))
-    {
-        half3 palette = body ? _ShadowColor.rgb : saturate(_SourceShadowColor.rgb);
-        shadow = min(shadow, palette);
-    }
+    // Body skin has one gray endpoint for both shaded and occluded regions,
+    // using the same skin palette as the face's SDF contact color. Clothing
+    // retains its deeper source-material palette and narrow toon boundary.
+    if (softBody) shadow = saturate(_ShadowColor.rgb);
+    else if (experiment && !body) shadow = min(shadow, saturate(_SourceShadowColor.rgb));
     half lineBlue = body ? lineMask.b * _DetailNormalMapScale : lineMask.b;
     half extend = 1 - 1.2h * _SourceShadowExtend * (1 - min(1 - lineBlue, 1 - detail.g));
     if (!body)
@@ -354,9 +377,20 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
         ramp = lerp(ramp, alternate, detailRed);
         shadow = saturate(shadow * max(1 - detailRed, 1 - _SourceShadowExtendAnother));
     }
+    // Soften cloth's authored shadow contrast after both palette and detail
+    // darkening. Keep its hue and toon boundary while retaining 60% of the
+    // color difference from the lit endpoint, including the detail multiply.
+    if (experiment && !body) shadow = lerp(1.0h, shadow, .6h);
     // Do not clamp extend: the source deliberately allows values below zero.
     half visibility = body ? saturate(2 * light.shadowAttenuation - 1) : light.shadowAttenuation;
-    half weight = ramp * extend * saturate(visibility * light.distanceAttenuation);
+    half materialWeight = ramp * extend;
+    // Give most of the body the gray endpoint and reserve the full lit color
+    // for surfaces closely facing the light. A wide transition avoids a second
+    // hard body band competing with the face's shading.
+    if (softBody) materialWeight = smoothstep(.55h, .85h, saturate(rampLight)) * saturate(extend);
+    if (experiment && !body) materialWeight = SourceNarrowToonBand(materialWeight);
+    materialWeight *= directFacing;
+    half weight = materialWeight * saturate(visibility * light.distanceAttenuation);
     float2 shiftedUV = input.rawUV + .8 * (_SourceSpecularHeight - 1) *
         float2(dot(input.tangentWS, viewWS), dot(input.bitangentWS, viewWS));
     half shiftedRed = SAMPLE_TEXTURE2D(_DetailMask, sampler_DetailMask,
@@ -407,7 +441,7 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
         // The experiment replaces it with SH / local bounce, so blocked lights
         // cannot keep skin illuminated independently of the room.
         direct = .6h * light.color * _StudioSurfaceLighting.y *
-            light.distanceAttenuation * light.shadowAttenuation;
+            light.distanceAttenuation * light.shadowAttenuation * directFacing;
         illumination = direct + environment;
         // Hair and clothes extend the skin's toon shadow, not a second
         // physical blackout of its key light. Use the same dark ramp endpoint
@@ -465,5 +499,10 @@ half3 EvaluateSourceBodyClothes(Varyings input, half3 albedo, half3 normalWS,
         half detailLine = lerp(lineMask.g, detail.b, _SourceDetailBLineG);
         lineWeight = pow(.9h - .89h * _SourceLineWidth, detailLine);
     }
-    return lerp(lineColor, color, lineWeight);
+    half3 result = lerp(lineColor, color, lineWeight);
+    // Detail/line multiplication and local projection must not invent a third,
+    // darker skin endpoint. This floor uses actual irradiance, so it preserves
+    // scene light occlusion, environmental color and the albedo's own details.
+    if (softBody) result = max(result, albedo * shadow * illumination);
+    return result;
 }

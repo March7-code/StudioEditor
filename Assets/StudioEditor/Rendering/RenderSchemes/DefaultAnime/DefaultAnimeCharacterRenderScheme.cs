@@ -75,6 +75,7 @@ namespace StudioEditor.Rendering.RenderSchemes
         {
             var deepShadow = new Color(0.42f, 0.45f, 0.52f, 1f);
             var shadow = new Color(0.72f, 0.75f, 0.80f, 1f);
+            var skinShadow = new Color(0.85f, 0.73f, 0.74f, 1f);
             var ambientStrength = 0.25f;
             var lightColorInfluence = 0.20f;
             var specularPower = 40f;
@@ -88,7 +89,7 @@ namespace StudioEditor.Rendering.RenderSchemes
             {
                 case CharacterRenderSurfaceRole.Skin:
                     deepShadow = new Color(0.58f, 0.46f, 0.50f, 1f);
-                    shadow = new Color(0.82f, 0.70f, 0.72f, 1f);
+                    shadow = skinShadow;
                     ambientStrength = 0.32f;
                     lightColorInfluence = 0.08f;
                     specularPower = 32f;
@@ -99,7 +100,7 @@ namespace StudioEditor.Rendering.RenderSchemes
                     break;
                 case CharacterRenderSurfaceRole.Face:
                     deepShadow = new Color(0.62f, 0.49f, 0.52f, 1f);
-                    shadow = new Color(0.85f, 0.73f, 0.74f, 1f);
+                    shadow = skinShadow;
                     ambientStrength = 0.36f;
                     lightColorInfluence = 0.05f;
                     specularPower = 28f;
